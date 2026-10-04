@@ -1,0 +1,16 @@
+# RadonEye RD200 backup reader (extras/backup_reader/rd200_counts.py).
+# Replace <USER> (the install steps in README.md do this) and adjust /opt/rd200 if you install elsewhere.
+[Unit]
+Description=RadonEye RD200 self-aligning backup reader
+After=bluetooth.service network-online.target
+Wants=bluetooth.service network-online.target
+
+[Service]
+User=<USER>
+WorkingDirectory=/opt/rd200
+ExecStart=/opt/rd200/venv/bin/python -u /opt/rd200/rd200_counts.py
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

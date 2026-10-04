@@ -1,0 +1,36 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {"title": "RadonEye RD200", "data": {"address": "Monitor"}},
+      "confirm": {"title": "Add {name}", "description": "Home Assistant will connect once to check the model.", "data": {"label": "Label (default: last 4 digits of the serial)"}}
+    },
+    "error": {"cannot_connect": "Could not connect. Move closer or try again."},
+    "abort": {
+      "already_configured": "This monitor is already set up.",
+      "already_in_progress": "Setup of this monitor is already in progress.",
+      "no_devices_found": "No RadonEye monitors heard by Home Assistant's Bluetooth.",
+      "unsupported_model": "Not supported: only RadonEye RD200 v2/v3 (RD200 v1 uses a different protocol)."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "RadonEye options",
+        "data": {
+          "label": "Label",
+          "factor": "Counts per hour per Bq/m³ (k)",
+          "backup_url": "Backup reader URL (optional, e.g. http://backup-host.local:8765)",
+          "parallel_with_rd200_ble": "Parallel run: read rd200_ble in its own slot"
+        }
+      }
+    }
+  },
+  "issues": {
+    "remove_yaml": {"title": "Remove radoneye_log from YAML", "description": "The RadonEye monitors were imported from YAML. Check they appear under Settings → Devices & services → RadonEye RD200, then delete the `radoneye_log:` block from configuration (for example packages/radoneye_log.yaml)."},
+    "window_not_recognised": {"title": "Radon {label}: counting window not recognised", "description": "This monitor's particle counts don't follow the 10-minute window seen on RD200V3 firmware V3.0.1, so counts-based radon is off. The device's own values are still read every 5 minutes."}
+  },
+  "services": {
+    "pull": {"name": "Pull RadonEye logs", "description": "Queue each monitor's stored hourly log for the next read slot (or now).", "fields": {"immediate": {"name": "Now", "description": "Run now instead of in the next slot (may collide with a second poller)."}}}
+  }
+}

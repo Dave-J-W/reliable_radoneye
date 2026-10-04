@@ -1,0 +1,6 @@
+pull:
+  fields:
+    immediate:
+      default: false
+      selector:
+        boolean:
