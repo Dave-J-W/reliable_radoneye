@@ -206,7 +206,7 @@ class Retest(unittest.TestCase):                                            # fi
         self.assertTrue(e.counts_mode)
         passed = [a for a in acts if isinstance(a, Notify) and a.kind == "validation_passed"]
         self.assertEqual(len(passed), 1)                                    # the hub deletes the repair issue
-        self.assertTrue(all(j.kind == "free" for j in done if j.slot < START + timedelta(hours=4)))
+        self.assertTrue(all(j.kind in ("free", "pull") for j in done if j.slot < START + timedelta(hours=4)))
 
     def test_failed_validation_not_retested_before_24h(self):
         state = {"validator": {**self.FAILED, "failed_at": (START - timedelta(hours=1)).isoformat()}}
@@ -214,7 +214,7 @@ class Retest(unittest.TestCase):                                            # fi
         acts, done = simulate({"A1": e}, {"A1": dev()}, START, START + timedelta(hours=22))
         self.assertEqual(e.validator.status, "failed")
         self.assertFalse([a for a in acts if isinstance(a, WriteWindow)])
-        self.assertTrue(all(j.kind == "free" for j in done))
+        self.assertTrue(all(j.kind in ("free", "pull") for j in done))   # daily pull rides free slots
 
 
 class MissedSince(unittest.TestCase):                                       # final review I4
@@ -329,6 +329,48 @@ class ReviewFixes(unittest.TestCase):
         self.assertEqual(len(pulls), 1)                                        # flag cleared by the pull
         self.assertLessEqual(pulls[0].slot - start, timedelta(minutes=12))
         self.assertEqual(pulls[0].slot.astimezone(TZ).hour, 2)
+
+    def _free_mode_pull_day(self, state, hours=2):
+        start = datetime(2026, 10, 2, 10, 50, 7, tzinfo=timezone.utc)          # 05:50 CDT
+        e = engine(state=state, now=start)
+        _, done = simulate({"A1": e}, {"A1": dev()}, start, start + timedelta(hours=hours))
+        return e, [j for j in done if j.kind == "pull"]
+
+    def test_pending_validator_pulls_once_after_six(self):
+        e, pulls = self._free_mode_pull_day({"validator": {"status": "pending"}})
+        self.assertEqual(len(pulls), 1)
+        self.assertGreaterEqual(pulls[0].slot.astimezone(TZ).hour, 6)
+        self.assertEqual(e.pull_date, "2026-10-02")
+
+    def test_failed_validator_pulls_once_after_six(self):
+        failed = {"status": "failed", "same_ok": 5, "violations": 0, "crossings": 60, "silent": 25,
+                  "failed_at": (datetime(2026, 10, 2, 10, 50, tzinfo=timezone.utc) - timedelta(hours=1)).isoformat()}
+        e, pulls = self._free_mode_pull_day({"validator": failed})
+        self.assertEqual(len(pulls), 1)
+        self.assertGreaterEqual(pulls[0].slot.astimezone(TZ).hour, 6)
+
+    def test_free_mode_pull_retries_then_next_free_slot(self):
+        start = datetime(2026, 10, 2, 10, 50, 7, tzinfo=timezone.utc)
+        e = engine(state={"validator": {"status": "pending"}}, now=start)
+        tries = []
+
+        def fails(serial, t, job):
+            if job.kind == "pull":
+                tries.append(job)
+                return len(tries) <= 2
+            return False
+        _, done = simulate({"A1": e}, {"A1": dev()}, start, start + timedelta(minutes=40), fails)
+        self.assertEqual([p.attempt for p in done if p.kind == "pull"], [1, 2, 1])
+
+    def test_request_pull_in_free_mode_pulls_in_next_free_slot(self):
+        start = datetime(2026, 10, 2, 7, 0, 7, tzinfo=timezone.utc)            # 02:00 CDT
+        e = engine(state={"validator": {"status": "pending"}}, now=start)
+        e.request_pull()
+        _, done = simulate({"A1": e}, {"A1": dev()}, start, start + timedelta(minutes=40))
+        pulls = [j for j in done if j.kind == "pull"]
+        self.assertEqual(len(pulls), 1)
+        self.assertLessEqual(pulls[0].slot - start, timedelta(minutes=12))
+        self.assertFalse(e.pull_requested)
 
     def test_counts_values_available_right_after_restore(self):               # Minor 1
         e = engine()

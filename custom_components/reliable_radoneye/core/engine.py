@@ -7,7 +7,7 @@ Each monitor always has exactly one pending chain job (plus, in a parallel run, 
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone, tzinfo
 
 from .radon_math import Derived, derive
@@ -113,12 +113,17 @@ class MonitorEngine:
         self.pull_requested = True
 
     # ------------------------------------------------------------------ scheduling
+    def _free_or_pull(self, at: datetime) -> Job:
+        """Free-mode job; the daily pull (or a requested one) rides on the first free slot that is due."""
+        j = free_job(self.serial, at)
+        return replace(j, kind="pull") if self._pull_due(at) else j
+
     def initial_jobs(self, now: datetime) -> list[Job]:
         return [free_job(self.serial, now)]
 
     def _schedule_next(self, job: Job, now: datetime) -> list[Job]:
         if self.anchor is None or not self.counts_mode:
-            nxt = free_job(self.serial, max(now, job.slot + UNALIGNED_EVERY))
+            nxt = self._free_or_pull(max(now, job.slot + UNALIGNED_EVERY))
             jobs = [nxt]
             if self.parallel and self.anchor is not None:      # anchor: set by every good read, any mode
                 roll = self._latest_rollover(nxt.slot)          # rd200_ble at +4:30 of that window, once:
