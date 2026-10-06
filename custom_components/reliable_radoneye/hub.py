@@ -185,7 +185,7 @@ class Hub:
         self._save()
         if with_history and (res.ok or job.kind == "pull_now" or job.attempt >= 2):
             try:
-                await self._after_pull(mon, status, history, now, err)
+                await self._after_pull(mon, status, history, now, err, job.attempt)
             except Exception:  # noqa: BLE001 - the pull archive is best-effort
                 _LOGGER.exception("RadonEye %s: pull bookkeeping failed", mon.label)
         self._signal(mon)
@@ -291,18 +291,19 @@ class Hub:
             _LOGGER.debug("rd200_ble poke %s: %s", entity_id, err)
         self.radio.add(dt_util.utcnow(), time.monotonic() - t0)
 
-    async def _after_pull(self, mon: Monitor, status, history, now: datetime, err: str | None) -> None:
+    async def _after_pull(self, mon: Monitor, status, history, now: datetime, err: str | None,
+                          attempt: int = 1) -> None:
         dev = {"serial": mon.serial, "label": mon.label,
                "statistic_id": pull.radon_statistic_id(self.hass, mon.serial, mon.statistic_id)}
         if status is None or history is None:
-            res = {"ok": False, "error": err or "no history"}
+            res = {"ok": False, "error": err or "no history", "attempts": attempt}
         else:
             points = pull.timestamped(history, int(status["uptime_minutes"]), now)
             await self.hass.async_add_executor_job(pull.write_files, self.out_dir, dev, status, history, now, points)
             filled = await pull.backfill(self.hass, self.out_dir, dev, points) if dev["statistic_id"] else 0
             res = {"ok": True, "points": len(points), "uptime_minutes": status["uptime_minutes"],
                    "latest_pci_l": status["latest_pci_l"], "firmware": status["firmware_version"],
-                   "read_at": now.isoformat(), "filled_hours": filled}
+                   "read_at": now.isoformat(), "filled_hours": filled, "attempts": attempt}
         await self.hass.async_add_executor_job(pull.append_pull_log, self.out_dir, now, dev, res)
         self.last_pull[mon.label] = {**res, "finished": now.isoformat()}
         async_dispatcher_send(self.hass, SIGNAL_HUB)
