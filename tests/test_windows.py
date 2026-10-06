@@ -147,6 +147,20 @@ class Validator(unittest.TestCase):
         self._good(v, 6000, T0 + timedelta(hours=24))
         self.assertEqual(v.status, "passed")
 
+    def test_only_informative_crossings_count(self):                      # the INFORMATIVE_MIN filter
+        def crossing(old_prev, new_prev, old_cur=0, new_cur=0):
+            v = W.WindowValidator()
+            v.observe(1005, old_cur, old_prev)                            # block 100
+            v.observe(1012, new_cur, new_prev)                            # block 101: a crossing
+            return v.crossings, v.silent
+        self.assertEqual(crossing(0, 0), (0, 0))                          # 0 -> 0: not counted
+        self.assertEqual(crossing(0, 0, 3, 0), (0, 0))                    # not even with current falling
+        self.assertEqual(crossing(0, 1), (1, 0))                          # 0 -> 1: counted, a rollover
+        self.assertEqual(crossing(1, 0), (1, 0))                          # 1 -> 0: counted, a rollover
+        self.assertEqual(crossing(1, 1), (1, 1))                          # 1 -> 1, current not falling: silent
+        self.assertEqual(crossing(1, 1, 2, 2), (1, 1))
+        self.assertEqual(crossing(1, 1, 2, 0), (1, 0))                    # 1 -> 1, current fell: a rollover
+
     def test_state_round_trip_keeps_status(self):
         v = W.WindowValidator({"status": "passed", "same_ok": 30, "violations": 0, "crossings": 30, "silent": 2})
         self.assertEqual(W.WindowValidator(v.to_dict()).status, "passed")

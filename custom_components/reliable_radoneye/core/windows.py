@@ -168,10 +168,13 @@ class WindowValidator:
     crossing was silent, so it drops crossings alike under either model. Long-run silent share in simulation
     (tests/sim.FakeRD200, Poisson counts, 5-min free reads, 10 seeds x 100 h), counting all crossings ->
     this rule, at 0.2-4 counts per 10 min:  10-min windows 0.70-0.02 -> at most 0.16 (worst near 1 count
-    per window);  20-min 0.50-0.77 -> 0.45-0.51;  60-min 0.83-0.87 -> 0.82-0.83. The limit is 0.30.
-    Also ignoring crossings where both are 1 (INFORMATIVE_MIN = 2) pushes the 10-min share near 0, but lets
-    a low-count 20-min device fall to 0.34, close to the limit, and a 10-min device at 0.5 counts/window
-    needs a median ~17 h to validate instead of ~5 h.
+    per window);  20-min 0.50-0.77 -> about 0.45-0.51 for >= 0.2 counts per 10 min, falling towards 1/3 at
+    very low counts (the margin over the limit is thin there);  60-min 0.83-0.87 -> 0.82-0.83. The limit
+    is 0.30. Also ignoring crossings where both are 1 (INFORMATIVE_MIN = 2) pushes the 10-min share near 0,
+    but lets a low-count 20-min device fall to 0.34, close to the limit, and a 10-min device at 0.5
+    counts/window needs a median ~17 h to validate instead of ~5 h.
+    At true zero radon every crossing is 0 -> 0, so the validator stays pending indefinitely (device values
+    only, no counts mode). This is by design: such data cannot tell a 10-min window from a longer one.
     """
 
     MIN_SAME = 20

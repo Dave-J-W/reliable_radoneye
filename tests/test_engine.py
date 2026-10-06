@@ -460,6 +460,19 @@ class LowRadonValidation(unittest.TestCase):                               # par
                                           and a.kind == "validation_failed"]), 1)
                     self.assertFalse([a for a in acts if isinstance(a, WriteWindow)])
 
+    def test_twenty_minute_windows_fail_at_low_counts(self):
+        # Here the filter drops many crossings, and the counted silent share tends to 1/3 at very low counts,
+        # just over the 0.30 limit. Simulated (200 seeds): fails by 34 h at 0.2/10 min, by 18 h at 0.5.
+        for per_10_min in (0.2, 0.5):
+            for seed in range(3):
+                with self.subTest(per_10_min=per_10_min, seed=seed):
+                    e, acts = self.validate(20, 2 * per_10_min, 72, seed)   # 72 h: the 24 h re-test may follow
+                    kinds = [a.kind for a in acts if isinstance(a, Notify) and a.kind.startswith("validation")]
+                    self.assertGreaterEqual(kinds.count("validation_failed"), 1, e.validator.to_dict())  # a verdict
+                    self.assertNotIn("validation_passed", kinds)
+                    self.assertNotEqual(e.validator.status, "passed")
+                    self.assertFalse([a for a in acts if isinstance(a, WriteWindow)])        # never in counts mode
+
 
 class ConflictOnce(unittest.TestCase):                                     # parked: hourly re-fetch re-warned
     def conflicts(self, acts):
@@ -510,6 +523,7 @@ class FirmwareChangeWhileFailed(unittest.TestCase):                       # park
     def test_old_failed_state_without_failed_at_also_clears(self):
         e, kinds = self.run_firmware_update(dict(self.FAILED))
         self.assertEqual(kinds, ["validation_passed"])
+        self.assertIsNone(e.validator.failed_at)
 
     def test_pass_after_firmware_change_from_passed_is_silent(self):
         e, kinds = self.run_firmware_update(PASSED)
