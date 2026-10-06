@@ -71,6 +71,7 @@ class Hub:
         self.tz = ZoneInfo(hass.config.time_zone)
         self.out_dir = hass.config.path("reliable_radoneye")
         self.last_pull: dict = {}
+        self._failed_logged: dict[str, str] = {}      # label -> local date of its last FAILED pull logbook entry
         self._task: asyncio.Task | None = None
         self._loaded = False
         self._radio_warned = False
@@ -94,6 +95,7 @@ class Hub:
         self.monitors[mon.serial] = mon
         if (owed := eng.startup_actions()):
             self.hass.async_create_task(self._apply(mon, owed))      # factor change: logbook only
+            self._save()                                             # persist factor_log now: a crash must not log it twice
         for job in eng.initial_jobs(now):
             self.queue.put(job)
         if self._task is None:
@@ -311,6 +313,11 @@ class Hub:
         async_dispatcher_send(self.hass, SIGNAL_HUB)
         msg = (f"ok, {res['points']} points, filled {res['filled_hours']} h" if res["ok"]
                else f"FAILED ({res['error']})")
+        if not res["ok"]:                      # a pull failing every slot: one FAILED logbook entry per local day
+            day = now.astimezone(self.tz).date().isoformat()
+            if self._failed_logged.get(mon.label) == day:
+                return
+            self._failed_logged[mon.label] = day
         self.hass.async_create_task(self.hass.services.async_call(
             "logbook", "log", {"name": "RadonEye log pull", "message": f"{mon.label}: {msg}"}))
 

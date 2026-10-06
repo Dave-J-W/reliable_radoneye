@@ -152,7 +152,7 @@ class MonitorEngine:
         if job.kind == "parallel":
             return [], []
         actions: list = []
-        if job.attempt == 1 and job.kind in ("A", "B", "pull"):
+        if job.attempt == 1 and job.kind in ("A", "B", "pull") and job.rollover is not None:   # aligned only: free pulls out
             self.reliability.record(job.slot.astimezone(self.tz), res.ok)
         if res.ok and res.status:
             actions += self._absorb(res)

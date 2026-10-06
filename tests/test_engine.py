@@ -349,6 +349,14 @@ class ReviewFixes(unittest.TestCase):
         self.assertEqual(len(pulls), 1)
         self.assertGreaterEqual(pulls[0].slot.astimezone(TZ).hour, 6)
 
+    def test_free_pull_does_not_count_toward_reliability(self):
+        start = datetime(2026, 10, 2, 10, 50, 7, tzinfo=timezone.utc)
+        e = engine(state={"validator": {"status": "pending"}}, now=start)
+        fails = lambda serial, t, job: job.kind == "pull"
+        _, done = simulate({"A1": e}, {"A1": dev()}, start, start + timedelta(hours=2), fails)
+        self.assertTrue([j for j in done if j.kind == "pull"])
+        self.assertEqual(e.reliability.total, 0)
+
     def test_free_mode_pull_retries_then_next_free_slot(self):
         start = datetime(2026, 10, 2, 10, 50, 7, tzinfo=timezone.utc)
         e = engine(state={"validator": {"status": "pending"}}, now=start)
@@ -573,9 +581,6 @@ class FirmwareChangeWhileFailed(unittest.TestCase):                       # park
         self.assertEqual(kinds, [])                                         # no repair issue to clear
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class FactorChanged(unittest.TestCase):
     def factor_notes(self, e):
@@ -591,3 +596,7 @@ class FactorChanged(unittest.TestCase):
     def test_same_k_or_no_stored_k_yields_none(self):
         self.assertEqual(self.factor_notes(engine(state={"validator": PASSED, "k": 1.27}, k=1.27)), [])
         self.assertEqual(self.factor_notes(engine(state={"validator": PASSED}, k=1.27)), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
