@@ -27,8 +27,8 @@ counts-based value divided by the device's own value. Set `new k = old k × rati
 and a ratio of 1.10, use 1.40. This makes the two consistent; it does not make either more accurate.
 
 **Does changing k lose data?** No. The raw counts are stored, so a new k re-scales every derived value at once
-and leaves the archive and the hourly counts statistics untouched. Each change is recorded in the
-integration's stored state.
+and leaves the archive and the hourly counts statistics untouched. Each change is written to the logbook and
+recorded in the integration's stored state.
 
 Details of the method: [the counts method](technical/counts-method.md).
 
@@ -58,14 +58,15 @@ backup reader is the same, and sends only `0x40`. See [the protocol](technical/p
 
 ## Does frequent reading drain a battery or interfere with other Bluetooth devices?
 
-- **Battery:** the RD200 runs from its power adapter, not a battery (as on the units tested), so frequent
-  reads cost nothing in battery life.
+- **Battery:** the RD200 units tested run from a mains power adapter and have no battery, so frequent reads
+  cost nothing in battery life. This comes from those units, not from the code: the status packet decoded
+  here has no battery field, so the integration cannot check it for your model.
 - **The monitor itself:** it accepts one connection at a time. While Home Assistant reads it (a few seconds,
   about 12 times an hour), the phone app cannot connect, and the other way round. Close the app when you are
   not using it.
 - **Your Bluetooth radio:** every read occupies one connection on the adapter or proxy for a few seconds.
-  `sensor.radoneye_radio_time_share` shows how much. With a few monitors it is a few percent, and the
-  integration warns above 50 %. Passive devices that only advertise (thermometers and the like) are not
+  `sensor.radoneye_radio_time_share` shows how much. A rough estimate (not a measurement) is 1 to 3 % per
+  monitor, and the integration warns above 50 %. Passive devices that only advertise (thermometers and the like) are not
   affected by connections in practice; other devices that need connections share the radio.
 - **Wi-Fi:** Bluetooth and 2.4 GHz Wi-Fi share the band. Heavy Wi-Fi traffic near a marginal link can make
   connects slower; it is not caused by this integration.
@@ -93,7 +94,8 @@ RD200 v3 was.
 
 Probably. The status read is the same; what may differ is the counting window. Each monitor is checked live,
 and if its counts do not follow a 10-minute window it simply runs with the device's own values and a Repair
-issue explains why. See [Troubleshooting](troubleshooting.md#repair-counting-window-not-recognised).
+issue explains why. The **Counting window check** sensor shows the result (`pending`, `passed` or `failed`).
+See [Troubleshooting](troubleshooting.md#repair-counting-window-not-recognised).
 
 ## Why pCi/L and not Bq/m³?
 

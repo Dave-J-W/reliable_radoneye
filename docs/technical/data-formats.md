@@ -89,16 +89,18 @@ These are the usual recorder statistics, not external ones.
 | Radon (counts, 1 h) | `measurement` | pCi/L |
 | Radon (counts, 24 h) | none | pCi/L |
 | First-attempt read success (4 h) | `measurement` | % |
-| Diagnostics: window capture, missed windows, counts vs device, signal strength, last good read; last boot; radio time share; last pull | none | |
+| Diagnostics: window capture, missed windows, counts vs device, counting window check (ENUM: `pending` / `passed` / `failed`), signal strength, last good read; last boot; radio time share; last pull | none | |
 
-The unique ids are `<serial>_<key>`, for example `XX01RE000001_radon_counts_1h`. There are also
+The unique ids are `<serial>_<key>`, for example `XX01RE000001_radon_counts_1h` or
+`XX01RE000001_counts_mode` (the Counting window check). There are also
 `<serial>_backup_reachable`, `reliable_radoneye_last_pull` and `reliable_radoneye_radio_share`.
 
 ---
 
 ## 3. Pull files
 
-These are written by `pull.py` after each daily pull, or after `reliable_radoneye.pull`.
+These are written by `pull.py` after each daily pull, or after `reliable_radoneye.pull`. The daily pull runs
+in every mode (in counts mode on an A slot, otherwise on an unaligned read).
 
 ### `rd200_<serial>_<label>_<YYYYmmddTHHMMSSZ>.json`
 
@@ -142,15 +144,18 @@ pull, or a `pull_now`.
 | `run_started_utc` | when the outcome was recorded |
 | `label` | monitor label |
 | `ok` | `True` / `False` |
-| `attempts` | always empty in 0.3.1 (the result dict has no `attempts` key) |
+| `attempts` | the attempt number of the job that produced the outcome: `1` or `2` for a scheduled pull, always `1` for a `pull_now` |
 | `points` | number of history points |
 | `uptime_minutes`, `latest_pci_l` | from the status in the same session |
 | `filled_hours` | statistics hours the backfill filled |
 | `error` | error text on failure (truncated to 200 characters), or `no history` |
 
 The `RadonEye log last pull` sensor shows the latest finish time. Its attributes are `all_ok`,
-`radon_<label>` (`ok` / `failed`) and `radon_<label>_detail`. The pull also writes a logbook entry
-"RadonEye log pull".
+`radon_<label>` (`ok` / `failed`) and `radon_<label>_detail` (the pull result: `ok`, `points`, `uptime_minutes`,
+`latest_pci_l`, `firmware`, `read_at`, `filled_hours`, `attempts`, or `ok`, `error`, `attempts` on failure; plus
+`finished`). The pull also writes a logbook entry "RadonEye log pull" with the message
+`<label>: ok, <points> points, filled <n> h` or `<label>: FAILED (<error>)`. A failing pull is retried at the next
+slot and writes a `pull_log.csv` row each time, but at most one FAILED logbook entry per monitor per local day.
 
 ### `backfill_audit.csv`
 
@@ -176,8 +181,9 @@ The integration logs under `custom_components.reliable_radoneye`:
 
 - at `debug`: each failed attempt (`RadonEye <label> <kind> attempt <n> failed: <error>`), a disconnect that did
   not complete cleanly, and backup-reader errors;
-- at `info`: the backfill;
-- at `exception`: the loop.
+- at `info`: the backfill, when it filled at least one hour;
+- at `warning`: a backfill skipped because the target statistic has no metadata;
+- at `error` (with a traceback): a failed job, an error in the hub loop, and failed pull bookkeeping.
 
 ---
 
@@ -206,7 +212,7 @@ Per-monitor keys (`MonitorEngine.to_state`):
 | `reliability` | object | `current` (ISO block start), `ok`, `total`, `last: {start, ok, total}` | current and previous 4 h block |
 | `validator` | object | `status` (`pending` / `passed` / `failed`), `same_ok`, `violations`, `crossings`, `silent`, `failed_at` (ISO or null) | until the next reset |
 | `firmware` | string | last seen `firmware_version` | |
-| `factor_log` | list | `{at, old, new}` for each change of *k* | **never truncated** |
+| `factor_log` | list | `{at, old, new}` for each change of *k* (each change is also written to the logbook once) | **never truncated** |
 | `pull_date` | string | local date (ISO) of the last successful pull | |
 | `k` | number | the factor in force at the last save | |
 | `boot` | object | `boot_utc`, `last_uptime`, `last_read_utc` | |

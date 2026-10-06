@@ -79,7 +79,8 @@ collide, so:
    `rd200_ble` uptime entity has a different ID, the request is skipped and `rd200_ble` shows no new values.
 
 Run both for **24 to 48 hours**. Note that during this time Reliable RadonEye is still validating its counting
-window (the first 3 to 5 hours), and the 24 h counts value needs 120 captured windows.
+window (the first 3 to 5 hours; watch `sensor.radon_upstairs_counting_window_check` change from `pending` to
+`passed`), and the 24 h counts value needs 120 captured windows.
 
 ### How to compare
 
@@ -126,8 +127,10 @@ There are two ways to check:
   from the browser developer console or a WebSocket tool. Compare `statistics_unit_of_measurement`,
   `unit_class` and `mean_type` for each pair. In the real migration all four pairs were identical.
 
-**If they differ, stop.** For example, if your old sensors were in Bq/m³, a rename would put pCi/L values into
-a Bq/m³ series. This case was not tested. Keep the new entities under their own IDs instead.
+**If they differ, stop.** For example, if your old sensors were in Bq/m³: Reliable RadonEye's radon sensors
+always report pCi/L (the unit is fixed in the code, with no option to change it), so a rename would put pCi/L
+values into a Bq/m³ series. **Unverified:** what Home Assistant then does with the statistics was not tested.
+Keep the new entities under their own IDs instead.
 
 ## 5. Delete the rd200_ble entries
 

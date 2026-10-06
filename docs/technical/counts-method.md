@@ -6,7 +6,7 @@ counts with an exact Poisson uncertainty. This document explains the counting wi
 window, the radon formula, the Garwood interval, the coverage rules, calibration of the factor *k*, and the
 live validator that decides whether a monitor's window model is the one this method assumes.
 
-Code: `core/windows.py`, `core/radon_math.py`, `core/engine.py`. Constants are quoted from version 0.3.1.
+Code: `core/windows.py`, `core/radon_math.py`, `core/engine.py`. Constants are quoted from version 0.3.2.
 
 ---
 
@@ -169,7 +169,8 @@ last = anchor + ⌊(now − anchor) / 10 min⌋ · 10 min      (the latest compu
 Before the first read after a restart, the anchor is replaced by the latest stored window. The 2-minute
 tolerance absorbs end-time jitter.
 
-The window ending at `last` is captured only by the A read at +1:00 to +2:20. Between the rollover and that read,
+The window ending at `last` is normally captured by the A read (attempts at +1:00, +1:20 and +2:00), or by B if
+A fails. Between the rollover and that read,
 the 1 h value is therefore computed over 5 of 6 windows (coverage 0.833), and then over 6 of 6. This was found
 in review and is unchanged; it does not bias the value, because missing windows shrink T (see below).
 
@@ -263,7 +264,8 @@ section 6.
 detector, and it is set per monitor in the options flow (0.01-100). The counts are stored raw, so **changing
 *k* never loses or distorts data**: every derived value uses the current *k*, and any past period can be
 recomputed from the CSV archive with any *k*. Every change of *k* is logged in the Store's `factor_log` as
-`{at, old, new}`.
+`{at, old, new}`, and written once to the logbook (*Radon &lt;label&gt;: factor k changed from 1.27 to 1.3
+counts/h per Bq/m³*).
 
 The `Counts vs device (7 d)` diagnostic is the calibration check. It uses the windows of the last 7 days that
 have a device value stored (`device_bq`, the device's `latest_bq_m3` at the capturing read), and it needs at
@@ -293,7 +295,9 @@ A ratio drifting away from 1 over weeks means one of two things: a mis-set facto
 A monitor enters **counts mode** only after its own reads have confirmed the 10-min / phase-0 model.
 Counts mode means aligned A/B reads, the count archive and the counts-based radon. Until then, and
 permanently if validation fails, it runs **device-values-only**: unaligned reads every 5 min, device values
-shown, no count archive, no counts-based radon.
+shown, no count archive, no counts-based radon. The daily log pull still runs, on an unaligned read. The
+validator's `status` is shown by the diagnostic sensor *Counting window check* (`pending` / `passed` /
+`failed`).
 
 `WindowValidator.observe(u, current, previous, at)` compares each read with the one before it:
 
@@ -432,7 +436,8 @@ at 0.5 within about 18 h (200 seeds).
 - **On failure** the engine emits `validation_failed`, and the hub raises the repair issue
   `window_not_recognised_<serial>`. The validator records `failed_at`.
 - **24 h after `failed_at`** (`RETEST_AFTER`) the next read resets all counters and sets the status back to
-  `pending`. `failed_at` is kept as a marker that this is a re-test. A pass on a re-test emits
+  `pending` (the *Counting window check* sensor shows `pending` again). `failed_at` is kept as a marker that
+  this is a re-test. A pass on a re-test emits
   `validation_passed`, which deletes the repair issue, and clears `failed_at`.
 - **A firmware change** (`firmware_version` differs from the stored one) replaces the validator with a fresh
   one, so the model is validated again. If the old validator had failed, the new one inherits `failed_at`

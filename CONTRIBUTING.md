@@ -27,7 +27,8 @@ Please read [docs/technical/architecture.md](docs/technical/architecture.md) bef
 Please include:
 
 1. **Versions:** Reliable RadonEye (`manifest.json`), Home Assistant, and the monitor's model and firmware.
-   The firmware is shown in the device page, or in `firmware_version` in a pull JSON file.
+   The firmware is in the `firmware` field of `sensor.radoneye_log_last_pull`'s `radon_<label>_detail`
+   attribute after a pull, or in `firmware_version` in a pull JSON file (the device page does not show it).
 2. **What you expected, and what happened**, with times in UTC if you can.
 3. **Debug log** covering at least 11 minutes, which is one full counting window:
 
@@ -43,6 +44,7 @@ Please include:
    - `First-attempt read success (4 h)`;
    - `Window capture (24 h)` and `Missed windows (24 h)`;
    - `Counts vs device (7 d)`;
+   - `Counting window check`;
    - `RadonEye radio time share`;
    - `Signal strength`.
 5. **For counting or validation issues:**
@@ -73,7 +75,8 @@ appear in file names, in entity ids, in the Store and in `raw_hex` (bytes 2-13).
   change, say so, and describe the rollback in `CHANGELOG.md`.
 - **Keep every number traceable.** A new constant needs a comment saying where it came from (a measurement, a
   simulation or a rule). If you change a number, update `docs/technical/` in the same pull request.
-- **Keep pull requests small, one concern each.** CI (hassfest, HACS and the unit tests) must be green.
+- **Keep pull requests small, one concern each.** CI (hassfest, HACS, the unit tests and the static
+  undefined-name check `scripts/check_names.py`) must be green.
 - **Add a changelog line** under an unreleased heading, written for users.
 
 ## Code style

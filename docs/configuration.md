@@ -43,6 +43,7 @@ working adapter or proxy.
    rebooted less than 60 minutes ago).
 2. **Window check.** While the counting window is being verified, the monitor is read every 5 minutes at
    unaligned times. This *device-values-only* mode typically lasts 3 to 5 hours (longer at very low radon).
+   The diagnostic sensor **Counting window check** shows `pending` meanwhile, then `passed` (or `failed`).
 3. **Counts mode.** Once verified, reads are aligned to the monitor's 10-minute counting window, each
    window's particle count is archived, and the counts-based radon sensors start reporting (the 1 h value
    after 4 captured windows, the 24 h value after 120).
@@ -81,10 +82,11 @@ The counts-based radon is `(counts per hour) / k` in Bq/m³, divided by 37 for p
 - **Change it** when you have run the monitor next to a reference instrument for several days, or when the
   *Counts vs device (7 d)* diagnostic stays clearly away from 1 and you want the counts-based value to agree
   with the display. The [FAQ](faq.md#calibration-and-the-factor-k) explains both methods.
-- Because the raw counts are stored, a new k applies at once to every derived value, past and present, and
-  never touches the archive or the hourly counts statistics. Each change of k is recorded (time, old value,
-  new value) in the integration's stored state. It is not written to the logbook, so note it yourself if you
-  want a visible record.
+- Because the raw counts are stored, a new k applies at once to the counts-based values (they are recomputed
+  from the stored windows), and never touches the archive or the hourly counts statistics. States already
+  recorded in history keep the k they were computed with; any past period can be recomputed from the archive.
+- Each change of k is written to the **logbook** once (*Radon upstairs: factor k changed from 1.27 to 1.3
+  counts/h per Bq/m³*) and recorded (time, old value, new value) in the integration's stored state.
 
 ### Backup reader URL
 
@@ -128,7 +130,7 @@ after the computed rollover, which can be up to 1 minute later than the true one
 |---|---|---|---|
 | **A** | +1:00 | +1:20 and +2:00 | Captures the window that just closed |
 | **B** | +6:00 | +6:20 and +7:00 | Second chance for the same window; fresh device value |
-| Daily pull | Replaces the first A read at or after **06:00 local** | One retry at +60 s; if both fail, the next A slots that day try again | Reads the device's stored hourly log |
+| Daily pull | Replaces the first A read at or after **06:00 local** (in device-values-only mode: the first unaligned read at or after 06:00) | One retry at +60 s; if both fail, the next A slots (or unaligned reads) that day try again | Reads the device's stored hourly log |
 | Backup reader (optional, other machine) | +3:30 and +8:30 | One retry at +20 s; never starts after +9:00 | Fills windows Home Assistant missed |
 | `rd200_ble` (parallel run only) | +4:30 | none | Keeps the two integrations apart |
 
@@ -137,7 +139,9 @@ captures the window; if B also fails, the window is recorded as **missed** (and 
 reader if there is one).
 
 In **device-values-only** mode (before the window check passes, or if it fails) reads are simply every
-5 minutes, with the same +20 s and +60 s retries.
+5 minutes, with the same +20 s and +60 s retries. The daily pull still runs: it takes the place of the first of
+these reads at or after 06:00 local, with one retry at +60 s. These unaligned reads are not timed around a backup
+reader's slots, and they are not counted in first-attempt read success.
 
 ## Multiple monitors
 
@@ -152,8 +156,10 @@ Add each monitor separately; each gets its own config entry, device, options and
   takes a few seconds.
 - **Isolation.** One monitor failing never stalls the others; an error in one job is logged and that monitor
   is simply read again a minute later.
-- **Radio budget.** Two reads per window per monitor is about 12 short connections per monitor per hour.
-  With a few monitors this is a few percent of the radio's time. The integration-wide
+- **Radio budget.** Two reads per window per monitor is about 12 short connections per monitor per hour (the
+  same in device-values-only mode: one read every 5 minutes). At roughly 5 to 8 seconds per read including the
+  disconnect, that is about 1 to 3 % of the radio's time per monitor. This is an estimate, not a measurement;
+  the sensor below reports the real figure. The integration-wide
   `sensor.radoneye_radio_time_share` reports the share of the last hour spent connected (including
   `rd200_ble` refreshes in a parallel run).
 - **Radio time-share warning.** Above **50 %** a persistent notification *RadonEye radio load* asks you to add
@@ -204,29 +210,31 @@ How the import behaves:
   The entries stay.
 
 Where to find the serial and address: the RadonEye app shows the serial (on the RD200V3 units tested, the
-Bluetooth name was `FR:` followed by the serial), and the Bluetooth integration's advertisement list shows
-the address. If you already use `rd200_ble`, its device page shows both.
+Bluetooth name was `FR:` followed by the serial; this is an observation, as the integration itself only relies on
+the name starting with `FR:`, the manifest's `local_name: FR:*` matcher), and the Bluetooth integration's
+advertisement list shows the address. If you already use `rd200_ble`, its device page shows both.
 
 ## The pull service
 
-`reliable_radoneye.pull` reads each monitor's stored hourly log (up to about a year of hourly values kept by
-the device) and fills hours that are **missing** from the long-term radon statistics. It never overwrites an
-existing hour. It runs once a day by itself; the service is for running it on demand.
+`reliable_radoneye.pull` reads each monitor's stored hourly log (the device's rolling log of hourly values;
+how far back it reaches depends on the device) and fills hours that are **missing** from the long-term radon
+statistics. It never overwrites an existing hour. It runs once a day by itself; the service is for running it on demand.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `immediate` | `false` | `false`: queue the pull for each monitor's next A read slot. `true`: run it now. |
+| `immediate` | `false` | `false`: queue the pull for each monitor's next read slot (the next A read in counts mode, the next unaligned read otherwise). `true`: run it now. |
 
 **Next slot (recommended).** The pull takes the place of the next A read, which is timed to stay clear of
-the backup reader. It counts as that day's pull, so the 06:00 pull is skipped that day if it already ran.
+the backup reader, or, in device-values-only mode, the next unaligned read (about every 5 minutes; not timed
+around the backup reader). It counts as that day's pull, so the 06:00 pull is skipped that day if it already
+ran. It works in every mode.
 
 ```yaml
 action: reliable_radoneye.pull
 ```
 
 **Immediately.** One attempt per monitor, as soon as the radio is free, with no retry. Use this if you are
-watching the result, or if a monitor is in device-values-only mode. It can collide with the backup reader's
-read of the same monitor.
+watching the result. It can collide with the backup reader's read of the same monitor.
 
 ```yaml
 action: reliable_radoneye.pull
@@ -253,8 +261,9 @@ What a pull does:
 3. Takes only the log points since the monitor's last power-up (only those have exact timestamps), skips
    the most recent 2 hours (Home Assistant compiles those itself), and imports the ones whose hour is
    missing from the target statistic. Each filled hour is listed in `backfill_audit.csv`.
-4. Appends a line to `pull_log.csv` and a logbook entry such as *upstairs: ok, 8760 points, filled 2 h*.
+4. Appends a line to `pull_log.csv` (including the attempt number) and a logbook entry *RadonEye log pull*
+   such as *upstairs: ok, 8760 points, filled 2 h*. A pull that fails (after its retry) also gets a row in
+   `pull_log.csv`; it is tried again at the next slot, but the logbook shows at most one *FAILED* entry per
+   monitor per day.
 
-> **Device-values-only mode.** The daily pull and a queued (`immediate: false`) pull happen in the aligned
-> read schedule, which only runs in counts mode. For a monitor that is still being validated, or whose
-> window check failed, use `immediate: true`.
+The number of points depends on how much log the monitor holds; 8760 (a year of hours) is only an example.

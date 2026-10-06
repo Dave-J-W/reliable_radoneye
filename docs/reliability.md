@@ -39,15 +39,17 @@ in [Configuration](configuration.md#read-schedule).
 
 > **What it measures:** the share of scheduled reads whose **first** attempt worked.
 
-- **Counted:** each scheduled A and B read (a daily pull counts as an A read) while Home Assistant was
-  running. Retries are not counted, in either direction.
+- **Counted:** each scheduled A and B read (a pull that takes an A slot counts as an A read) while Home
+  Assistant was running. Retries are not counted, in either direction, and neither are immediate pulls or
+  pulls made on an unaligned read in device-values-only mode.
 - **Formula:** first attempts that succeeded / scheduled reads, as a percentage.
 - **Blocks:** fixed 4-hour blocks of local time starting at 00:00, 04:00, 08:00, 12:00, 16:00 and 20:00. The
   sensor shows the **previous** complete block; its `block_start` attribute says which. A normal block has
   48 scheduled reads per monitor (24 windows × 2).
 - **Restarts:** the counters are saved, so a restart within a block continues it. A block during which Home
   Assistant was not running at all shows `unknown`, not 0 %.
-- **Only in counts mode.** In device-values-only mode there are no scheduled A/B reads, so it stays `unknown`.
+- **Only in counts mode.** In device-values-only mode there are no scheduled A/B reads, so it stays `unknown`
+  (the **Counting window check** sensor shows `pending` or `failed` then).
 - **Long-term statistics:** yes. You can graph it over months.
 
 A failed first attempt usually means a slow or aborted connection: the read is given at most 15 seconds to
@@ -83,11 +85,12 @@ interval gets slightly wider.
 > **What it measures:** the share of the last hour that the integration spent with a Bluetooth connection open.
 
 - **Counted:** the time of every connection attempt, successful or not, including daily pulls and, in a
-  parallel run, `rd200_ble` refreshes. It covers all monitors together and is recomputed hourly.
+  parallel run, `rd200_ble` refreshes. It covers all monitors together. The sensor is refreshed hourly; the
+  warning below is checked every minute.
 - **Above 50 %:** a persistent notification *RadonEye radio load* asks you to add a Bluetooth proxy near the
   monitors. It clears itself when the share falls below 40 %.
 - **Why it rises:** many monitors on one adapter, or slow connects. Failing attempts take up to 20 seconds
-  each, against a few seconds for a good read.
+  each (28 seconds for a pull), against a few seconds for a good read.
 
 Rough budget (an estimate, not a measurement): a good read takes about 5 to 8 seconds including the
 disconnect, and there are about 12 reads per monitor per hour, so expect roughly 1 to 3 % per monitor.
@@ -166,4 +169,4 @@ What does **not** help:
 - **Reading more often.** The schedule already gives each window six chances, and more reads only add radio
   load.
 - **Raising timeouts.** Each connection is deliberately limited to 20 seconds (15 s to connect and read, 5 s to
-  disconnect), so that one slow monitor never blocks the radio for others.
+  disconnect; 28 seconds for the daily pull), so that one slow monitor never blocks the radio for others.

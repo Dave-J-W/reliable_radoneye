@@ -30,6 +30,7 @@ reliable_radoneye/
 │       ├── timing.py          capped_then_close
 │       └── archive.py         count CSV writer
 ├── extras/backup_reader/      optional second reader (rd200_counts.py, systemd unit, example config)
+├── scripts/check_names.py     static undefined-name check (stdlib only), run in CI
 ├── tests/
 │   ├── sim.py                 FakeRD200, poisson_counts, simulate (not a test module)
 │   ├── fixtures/pulse_counts/ the frozen trial CSVs (placeholder serials)
@@ -37,6 +38,7 @@ reliable_radoneye/
 ├── docs/                      user guide; docs/technical/ = this reference
 ├── .github/workflows/validate.yml
 ├── hacs.json, CHANGELOG.md, LICENSE, README.md, CONTRIBUTING.md
+└── .gitattributes             line endings: LF for all text files (`* text=auto eol=lf`)
 ```
 
 `core/windows.py` must keep **no relative imports**. The backup reader copies it next to itself and imports it
@@ -56,6 +58,16 @@ python -m unittest discover -s tests -t .
 - `-t .` makes `tests` a package, which `test_engine.py` relies on (`from tests.sim import ...`).
 - Without `bleak`, `test_radoneye_protocol` and `test_backup_reader` fail to import (2 errors). The other
   modules still run.
+- The static undefined-name check, which CI runs after the tests:
+
+  ```sh
+  python scripts/check_names.py          # scans custom_components/reliable_radoneye/**/*.py
+  ```
+
+  It prints `file:line name` for every name that is read but bound nowhere in scope, and exits 1 if there is
+  any. `py_compile` cannot catch such a `NameError`, which only fires when the line runs. The check is
+  deliberately loose (a name bound anywhere in a function counts as bound), so it gives no false alarms. Pass
+  file paths to scan other files.
 - To run one module or one test:
 
   ```sh
@@ -63,7 +75,7 @@ python -m unittest discover -s tests -t .
   python -m unittest tests.test_engine.LowRadonValidation.test_low_radon_ten_minute_device_passes -v
   ```
 
-- The suite has 101 tests and runs in a few seconds. CI uses Python 3.13. The core must not depend on
+- The suite has 108 tests and runs in a few seconds. CI uses Python 3.13. The core must not depend on
   version-specific features, because it also runs on the backup reader's Python (3.11 or later).
 
 | Module | What it covers |
@@ -75,7 +87,7 @@ python -m unittest discover -s tests -t .
 | `test_reliability.py` | 4 h blocks (including DST and late slots), radio share |
 | `test_timing.py` | `capped_then_close`: slow close, close timeout or error, work timeout or error, worst-case bound, cancellation |
 | `test_archive.py` | CSV round trip across UTC midnight, `hour_totals` |
-| `test_engine.py` | Engine simulations: timing, capture, guards, restarts, reboots, pulls, staleness, five monitors, validation, re-test, backup refetch, factor change, persistence and size, the parallel run, low-radon validation, conflicts, firmware change |
+| `test_engine.py` | Engine simulations: timing, capture, guards, restarts, reboots, pulls (including pulls with the validator pending or failed, and free-slot pulls left out of reliability), staleness, five monitors, validation, re-test, backup refetch, factor change and its one-time logbook note, persistence and size, the parallel run, low-radon validation, conflicts, firmware change |
 | `test_backup_reader.py` | The backup reader's self-aligned plan, `parse_since`, and the ring (corrupt file, dedupe, prune) |
 
 ---
@@ -153,7 +165,8 @@ Some guidelines for these tests:
 - **Offset the boot by seconds** (`seconds=20` above), so that the computed rollovers are not exactly on the
   minute. This exercises the 1-minute uptime bias.
 - **Test a restart** with `e.to_state(at)`, then `json.loads(json.dumps(...))` (that round trip is what the
-  Store gives back), then a new `MonitorEngine(..., state=..., now=at)`.
+  Store gives back), then a new `MonitorEngine(serial, label, k, tz, at, state=...)` (the fifth argument is
+  `now_utc`).
 - **Assert on actions and on `entity_states`**, not on private fields, where you can.
 - **For statistical properties, loop over seeds** with `self.subTest(seed=...)`, and assert something that
   holds for every seed, or a robust quantile. `LowRadonValidation` is an example of both.
@@ -191,9 +204,9 @@ dispatch:
 |---|---|
 | `hassfest` | `home-assistant/actions/hassfest`: manifest, translations, services, config-flow conventions |
 | `hacs` | `hacs/action` with `category: integration`: HACS repository requirements (`hacs.json`, README, structure) |
-| `tests` | Python 3.13, `pip install bleak`, then `python -m unittest discover -s tests -t .` |
+| `tests` | Python 3.13, `pip install bleak`, then `python -m unittest discover -s tests -t .`, then the static undefined-name check `python scripts/check_names.py` |
 
-All three must pass before a merge.
+All three jobs must pass before a merge.
 
 ---
 
@@ -216,7 +229,8 @@ repository's releases, and `hacs.json` declares the minimum Home Assistant versi
 5. Tag the commit `vX.Y.Z` (annotated) and create a GitHub release from the tag, with the changelog section
    as its notes.
 
-No tags exist yet in the repository. 0.3.0 and 0.3.1 were recorded in the changelog and the manifest only.
+No tags exist yet in the repository. 0.3.0, 0.3.1 and 0.3.2 were recorded in the changelog and the manifest
+only.
 
 ---
 
@@ -246,7 +260,8 @@ unit tests. It is verified by evidence on a running instance.
    - **Entities exist.** Device values are available within one read.
    - **`.storage/reliable_radoneye.state`** appears within about 10 min of the first read.
    - **Validator.** It passes after about 3.3 h at moderate radon, and later at low radon (see
-     [counts-method.md](counts-method.md#time-to-reach-min_cross)). In the meantime `Radon (counts, …)`
+     [counts-method.md](counts-method.md#time-to-reach-min_cross)). The *Counting window check* sensor shows
+     `pending`, then `passed`. In the meantime `Radon (counts, …)`
      stays unavailable, and no count CSV is written.
    - **In counts mode:**
      - one row per 10 min in `counts_<serial>_<label>_<date>.csv`, with `read_at_utc − window_end_utc` about

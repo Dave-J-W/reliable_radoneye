@@ -51,9 +51,10 @@ was built around three ideas:
 - The device's own values: latest radon, 1-day and 1-month averages, peak, last boot.
 - Reliability diagnostics: first-attempt read success per 4 h block (kept in long-term statistics), window
   capture and missed windows over 24 h, a counts-vs-device check over 7 days, radio time share.
-- A live check, per monitor, that its counts really follow a 10-minute window before counts mode is used.
+- A live check, per monitor, that its counts really follow a 10-minute window before counts mode is used,
+  shown by the *Counting window check* diagnostic sensor (pending, passed or failed).
 - Daily pull of the device's stored hourly log that fills **missing** hours in the long-term radon
-  statistics (never overwrites); `reliable_radoneye.pull` service.
+  statistics (never overwrites), in every mode; `reliable_radoneye.pull` service.
 - Honest staleness, persistent notifications for an unreachable monitor or an overloaded radio, and a Repair
   issue for a monitor whose counting window is not recognised.
 - Everything is local. No cloud, no account.
@@ -85,7 +86,8 @@ connections, within reasonable range of each monitor. See [Installation](docs/in
 4. Optionally type a **label** such as `upstairs` (default: the last 4 characters of the serial) and
    **Submit**. Home Assistant connects once to read the serial number and model.
 5. Within about 5 minutes `sensor.radon_upstairs_radon` shows the device's value. Counts-based radon
-   follows once the monitor's counting window has been verified, usually after **3 to 5 hours**.
+   follows once the monitor's counting window has been verified, usually after **3 to 5 hours**
+   (`sensor.radon_upstairs_counting_window_check` then changes from `pending` to `passed`).
 
 Migrating from `rd200_ble` and want to keep your history? Read
 [Migration from rd200_ble](docs/migration-from-rd200_ble.md) **before** step 3.
@@ -103,6 +105,7 @@ Per monitor, with the label `upstairs`:
 | Radon (counts, 24 h) | `sensor.radon_upstairs_radon_counts_24_h` | Derived from 144 windows, with `lower`/`upper` |
 | First-attempt read success (4 h) | `sensor.radon_upstairs_first_attempt_read_success_4_h` | Radio quality, % |
 | Window capture (24 h), Missed windows (24 h), Counts vs device (7 d) | `sensor.radon_upstairs_window_capture_24_h` ... | Diagnostics |
+| Counting window check | `sensor.radon_upstairs_counting_window_check` | Diagnostic: `pending`, `passed` or `failed` |
 | Signal strength, Last good read | `sensor.radon_upstairs_signal_strength` ... | Diagnostics, disabled by default |
 | Backup reader reachable | `binary_sensor.radon_upstairs_backup_reader_reachable` | Only with a backup reader URL |
 
@@ -137,8 +140,9 @@ Technical documentation for developers and the curious:
   `lower`/`upper`). Use the 24 h value for trends.
 - A monitor accepts **one Bluetooth connection at a time**. The phone app, another integration or another
   script reading the same monitor will collide with Home Assistant's reads.
-- The daily log pull and its gap-filling run only while a monitor is in counts mode, unless you call the
-  `pull` service with `immediate: true` (see [Configuration](docs/configuration.md#the-pull-service)).
+- Before the counting window check has passed (or after it failed), reads are not aligned to the window, so
+  the daily log pull rides on an unaligned read and is not timed to stay clear of a backup reader (see
+  [Configuration](docs/configuration.md#the-pull-service)).
 - The conversion factor *k* is a starting point measured on two units, not an independent calibration (see
   the [FAQ](docs/faq.md#calibration-and-the-factor-k)).
 - Radon values are in pCi/L (1 pCi/L = 37 Bq/m³).

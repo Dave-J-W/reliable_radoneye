@@ -2,7 +2,7 @@
 
 This document describes how Reliable RadonEye (domain `reliable_radoneye`) is built. It covers the module
 layout, the data flow, the read scheduler, retries and deadlines, persistence and failure isolation. Every
-number here is taken from the code at version 0.3.1. Where the original design spec says something different,
+number here is taken from the code at version 0.3.2. Where the original design spec says something different,
 the difference is noted.
 
 Related documents: [counts-method.md](counts-method.md) (the measurement), [protocol.md](protocol.md) (the
@@ -106,7 +106,8 @@ Step by step, for one aligned read (kind `A` or `B`):
 3. The result becomes a `ReadResult(ok, finished_utc, status, rssi, error, duration_s)`. The session time is
    added to `RadioTime`, whether or not the read succeeded.
 4. `MonitorEngine.on_result(job, res, now)`:
-   - records first-attempt success for A, B and pull jobs (attempt 1 only);
+   - records first-attempt success for A, B and aligned pull jobs (attempt 1 only, and only jobs with a
+     rollover: a pull made on a free slot is not counted);
    - on success, `_absorb` handles a firmware change, reboot detection, the validator, the anchor
      (`last_rollover`), "reachable again", and, in counts mode, the captured window (`captured_window`, then
      `WindowLog.add`);
@@ -121,7 +122,7 @@ Step by step, for one aligned read (kind `A` or `B`):
    exception there is logged and swallowed.
 
 Entities never compute anything themselves. `Monitor.states(now)` caches `engine.entity_states(now)` per
-minute, and `_signal` clears that cache. All 13 sensors of a monitor therefore share one computation per signal.
+minute, and `_signal` clears that cache. All 14 sensors of a monitor therefore share one computation per signal.
 
 ---
 
@@ -168,7 +169,8 @@ _run():
 |---|---|---|---|---|---|---|
 | `A` | `a_or_b_after` (counts mode) | computed rollover + 1:00 | next rollover (+10:00) | 0, +20 s, +60 s | 15 s + 5 s close | yes (attempt 1) |
 | `B` | `a_or_b_after` (counts mode) | computed rollover + 6:00 | next rollover | 0, +20 s, +60 s | 15 s + 5 s close | yes |
-| `pull` | an `A` slot when a pull is due | rollover + 1:00 | next rollover | 0, +60 s | 23 s + 5 s close | yes (counts as A) |
+| `pull` (aligned) | an `A` slot when a pull is due (counts mode) | rollover + 1:00 | next rollover | 0, +60 s | 23 s + 5 s close | yes (counts as A) |
+| `pull` (free) | a `free` slot when a pull is due (`_free_or_pull`, not in counts mode) | previous slot + 5:00 | slot + 5:00 | 0, +60 s | 23 s + 5 s close | no (no rollover) |
 | `pull_now` | service `reliable_radoneye.pull` with `immediate: true` | now | now (so it wins EDF) | 1 only | 23 s + 5 s close | no |
 | `free` | unaligned mode (no anchor yet, or validator not passed) | previous slot + 5:00 (or now) | slot + 5:00 | 0, +20 s, +60 s | 15 s + 5 s close | no |
 | `parallel` | parallel-run option only | computed rollover + 4:30 | next rollover | 1 only | 20 s (`update_entity` wait) | no |
@@ -179,15 +181,19 @@ Notes taken from the code:
   `max(now, previous slot + MIN_GAP)`, where `MIN_GAP` is 2 min. The anchor (the computed rollover of the
   latest good read) can move by up to a minute between reads, and `MIN_GAP` stops that from producing two
   slots back to back.
-- **Pull.** A pull replaces an `A` slot when `_pull_due(slot)` holds. That is the case when a pull was
-  requested, or when the slot is at or after 06:00 local and no pull has succeeded yet that local day
-  (`pull_date`). If both attempts fail, the next `A` slot becomes a pull again. A pull is only scheduled from
-  the aligned path, so **a monitor that is not in counts mode gets no scheduled pull**: `request_pull()` sets a
-  flag that only an aligned `A` slot consumes. Use `immediate: true` for such a monitor. The spec put the pull
-  retry at +2:00 with a 28 s cap; the code retries at +60 s with a 23 s connect+read cap plus 5 s for the
-  disconnect.
+- **Pull.** A pull replaces an `A` slot (counts mode) or a `free` slot (any other mode, through
+  `_free_or_pull`) when `_pull_due(slot)` holds. That is the case when a pull was requested
+  (`request_pull()`, from the service with `immediate: false`), or when the slot is at or after 06:00 local and
+  no pull has succeeded yet that local day (`pull_date`). A success sets `pull_date` and clears the request. If
+  both attempts fail, the next `A` (or free) slot becomes a pull again. A free-slot pull has no rollover, so it is
+  not recorded in `ReliabilityBlocks`. The spec put the pull retry at +2:00 with a 28 s cap; the code retries at
+  +60 s with a 23 s connect+read cap plus 5 s for the disconnect.
+- **Pull outcome.** `_after_pull` runs on success, on a `pull_now`, or on the last attempt (attempt 2) of a
+  failed scheduled pull. Every outcome appends a `pull_log.csv` row with the job's attempt number. A failure
+  writes at most one *FAILED* logbook entry per monitor per local day (`Hub._failed_logged`, in memory only).
 - **pull_now.** It runs alongside the monitor's chain job and does not reschedule anything.
-- **Free.** The next free job is due at `max(now, slot + 5 min)`. In the parallel-run mode, each free read
+- **Free.** The next free job is due at `max(now, slot + 5 min)` (a `pull` when one is due). In the parallel-run
+  mode, each free read
   also queues at most one `parallel` job per device window, at that window's +4:30.
 - **Parallel.** This calls `homeassistant.update_entity` on the old `rd200_ble` entity
   `sensor.fr_<serial>_radon_uptime`, if it exists, with a 20 s timeout. The call goes through the same queue,
@@ -306,13 +312,16 @@ recorded as `missed` becomes `captured` when the backup later supplies it.
 - **Layout:** one key per monitor serial, whose value is `MonitorEngine.to_state(now)`. All keys are listed in
   [data-formats.md](data-formats.md#5-the-store).
 - **What it holds:** measurements and counters only (windows, outcomes, the reliability counters, the
-  validator state, the boot tracker, firmware, `pull_date`, `k` and `factor_log`). It never holds a displayed
-  value, which is why a restored measurement can be reused while an old reading is never shown as current.
+  validator state, the boot tracker, firmware, `pull_date`, `k`, `factor_log` and
+  `conflicts_warned`). It never holds a displayed value, which is why a restored measurement can be reused while an old reading is never shown as current.
 
 **Save rate.** `Hub._save()` calls `store.async_delay_save(data, 600)` behind a pending flag. The first
 change after a save starts a 10-minute timer, and later changes before it fires are folded into the same
 write. The Store is therefore written **at most once per 10 minutes**, from whatever state the engines hold at
-that moment. Removing or reloading a config entry saves immediately and clears the flag. On a clean shutdown,
+that moment. Removing or reloading a config entry saves immediately and clears the flag. A changed *k* found at
+setup also calls `_save()` at once (`Hub.async_add`), but that is the same delayed save: the new `k` and its
+`factor_log` entry reach the file up to 10 minutes later, and a crash inside that interval would log the change
+again at the next start. On a clean shutdown,
 HA's final write flushes a pending delayed save.
 
 **Size.** Windows are stored as compact strings, `"end_epoch_s,index,count,h|b,read_at_epoch_s,device_bq"`.
@@ -334,7 +343,8 @@ default:
 | `windows` as dicts (before the compact format) | `Window.load` accepts both a dict and a compact row |
 | no `conflicts_warned` | `[]` |
 | a failed validator without `failed_at` | the 24 h re-test clock starts at the next read |
-| no `k`, or a different `k` | a different `k` is appended to `factor_log` as `{at, old, new}` |
+| no `k` | nothing is logged; the current `k` is saved |
+| a different `k` | appended to `factor_log` as `{at, old, new}`, and a `factor_changed` logbook entry |
 
 **Forward compatibility is not guaranteed.** A build that predates `Window.load` cannot read compact rows. To
 roll back past that change, delete the `windows` key from the Store while HA is stopped.
@@ -360,7 +370,7 @@ entry) therefore blanks nothing that had been measured.
 | Pull bookkeeping (files, recorder) fails | Logged and swallowed. The read result has already been applied. |
 | The backup reader is down, slow or malformed | The fetch runs outside the queue as its own task with a 5 s timeout. It only sets `backup_ok = False`, which the `Backup reader reachable` sensor shows. Reads are never delayed. |
 | A monitor is unreachable | Device values become `unavailable` after 20 min, and a persistent notification is raised after 1 h. The notification is dismissed on the next good read. Other monitors are served normally, and its failing jobs only consume their own caps. |
-| The window model is not recognised | That monitor runs device-values-only with free reads, and a repair issue `window_not_recognised_<serial>` is raised. The validator is re-tested 24 h later. |
+| The window model is not recognised | That monitor runs device-values-only with free reads (the daily pull still rides on a free slot), and a repair issue `window_not_recognised_<serial>` is raised. The *Counting window check* sensor shows `failed`. The validator is re-tested 24 h later. |
 | The radio is overloaded | Above 50 % of the last hour connected, a persistent notification is raised; it clears below 40 %. |
 | A monitor is removed mid-session | Its result is discarded (invariant 2). |
 
@@ -372,8 +382,14 @@ entry) therefore blanks nothing that had been measured.
 | `reachable` | dismisses the notification above, and logbook |
 | `count_conflict` | persistent notification `reliable_radoneye_count_conflict_<serial>` and logbook |
 | `reboot` | logbook only |
+| `factor_changed` | logbook only (returned once by `startup_actions()` when the engine is built with a new `k`) |
 | `validation_failed` | repair issue `window_not_recognised_<serial>` and logbook |
 | `validation_passed` | deletes that repair issue, and logbook (emitted only on a re-test) |
 
-A factor change is recorded in the Store's `factor_log`. The spec also asked for a logbook entry, but the code
-does not write one.
+Every `Notify` is written to the logbook under the name *Radon &lt;label&gt;*. A factor change is also recorded
+in the Store's `factor_log`. Pull outcomes are not `Notify` actions: `_after_pull` writes them to the logbook
+under *RadonEye log pull* (failures at most once per monitor per day).
+
+The validator's status is also an entity: the diagnostic ENUM sensor *Counting window check* (key
+`counts_mode`, unique id `<serial>_counts_mode`) shows `entity_states()["counts_mode"]`, that is
+`WindowValidator.status`: `pending`, `passed` or `failed`.

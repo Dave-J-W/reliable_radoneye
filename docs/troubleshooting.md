@@ -10,8 +10,8 @@ turn on [debug logging](#debug-logging) for 15 minutes first.
 
 | Symptom | Section |
 |---|---|
-| Radon works, counts-based radon stays `unavailable` | [Counts-based radon stays unavailable](#counts-based-radon-stays-unavailable) |
-| Repair: *counting window not recognised* | [Window not recognised](#repair-counting-window-not-recognised) |
+| Radon works, counts-based radon stays `unavailable`; Counting window check shows `pending` | [Counts-based radon stays unavailable](#counts-based-radon-stays-unavailable) |
+| Repair: *counting window not recognised*; Counting window check shows `failed` | [Window not recognised](#repair-counting-window-not-recognised) |
 | Radon is `unavailable`, or a *has not been read since* notification | [Device values unavailable](#device-values-unavailable-or-stale) |
 | First-attempt read success is low | [Low first-attempt success](#low-first-attempt-read-success) |
 | `BleakCharacteristicNotFoundError` in the log | [BleakCharacteristicNotFoundError](#bleakcharacteristicnotfounderror) |
@@ -30,6 +30,8 @@ turn on [debug logging](#debug-logging) for 15 minutes first.
 - **Radon** and the device averages work normally.
 - **Radon (counts, 1 h)** and **(counts, 24 h)** are `unavailable`.
 - **Window capture** and **First-attempt read success** are `unknown`.
+- The diagnostic sensor **Counting window check** (`sensor.radon_upstairs_counting_window_check`) shows
+  `pending`.
 - There is no Repair issue.
 
 **Cause: the window check is still pending.** Before trusting the particle counts, the integration checks live
@@ -58,15 +60,18 @@ The counts sensors also need enough captured windows once counts mode starts:
 - **1 h value:** 4 of the last 6 windows, so about 40 minutes.
 - **24 h value:** 120 of the last 144 windows, so about **20 hours**.
 
-**What to do:** usually nothing; wait. To see progress, look at the integration's stored state
-`/config/.storage/reliable_radoneye.state`, read-only, for example through the File editor or Samba add-on. Under
-each serial, `"validator"` shows `status` (`pending`, `passed` or `failed`) together with the `same_ok`,
-`crossings` and `silent` tallies. The file is saved at most every 10 minutes.
+**What to do:** usually nothing; wait. The **Counting window check** sensor changes to `passed` when the check
+passes, and counts mode starts with the read that completed the check. To see the progress tallies, look at the
+integration's stored state `/config/.storage/reliable_radoneye.state`, read-only, for example through the File
+editor or Samba add-on. Under each serial, `"validator"` shows `status` (`pending`, `passed` or `failed`) together with the
+`same_ok`, `violations`, `crossings` and `silent` tallies. The file is saved at most every 10 minutes, so it can
+lag the sensor.
 
 ## Repair: counting window not recognised
 
-**What you see:** a Repair issue *Radon upstairs: counting window not recognised*, a logbook entry saying counts
-mode is off, and device values only.
+**What you see:** a Repair issue *Radon upstairs: counting window not recognised*, the **Counting window check**
+sensor at `failed`, a logbook entry saying the monitor is running with the device's own values only, and device
+values only.
 
 **Cause:** the window check **failed**. Either of these makes it fail:
 
@@ -83,8 +88,8 @@ Possible reasons:
 
 **What happens next, automatically**
 
-- The check is **re-run from scratch 24 hours after it failed**, and again every 24 hours while it keeps
-  failing.
+- The check is **re-run from scratch 24 hours after it failed** (at the first read after that), and again 24
+  hours after each new failure. During a re-test the sensor shows `pending`.
 - If a re-test passes, the Repair issue disappears, the logbook says *counting window recognised on re-test;
   counts mode on*, and counts mode starts.
 - A **firmware change** detected on the monitor also starts a fresh check, and a pass then clears the issue too.
@@ -208,8 +213,7 @@ missing from the radon history.
 
 | Cause | How to tell | Fix |
 |---|---|---|
-| Monitor in device-values-only mode | Counts sensors are `unavailable` | The scheduled pull runs only in counts mode. Call `reliable_radoneye.pull` with `immediate: true`. |
-| Connection failed | `radon_upstairs_detail` shows `error`; `pull_log.csv` has the error | The pull is retried after 60 s, then at the following A read slots that day. Improve the link if it keeps failing. |
+| Connection failed | `radon_upstairs_detail` shows `error`; `pull_log.csv` has the error and the attempt number; the logbook has one *FAILED* entry for that monitor that day | The pull is retried after 60 s, then at the following read slots that day (A slots in counts mode, unaligned reads otherwise), each failure adding a `pull_log.csv` row. Improve the link if it keeps failing. |
 | Pull succeeded but `filled_hours` is 0 | Detail shows `ok: true, filled_hours: 0` | Normal when no hours are missing. Only hours since the monitor's last power-up, and older than 2 hours, are filled. |
 | Backfill target missing | Log warning *no statistics metadata for ...; backfill skipped* | The `statistic_id` from YAML does not exist, or the Radon sensor has no statistics yet. |
 
@@ -314,11 +318,12 @@ logger:
 
 What the integration logs at debug level:
 
-- every failed attempt: `RadonEye <label> <A|B|pull|free> attempt <n> failed: <error>`;
+- every failed attempt: `RadonEye <label> <A|B|pull|pull_now|free> attempt <n> failed: <error>`;
 - problems with the backup reader;
 - disconnects that did not complete cleanly.
 
-At info level it logs how many statistics hours each daily pull filled. Errors in a job are logged with a
+At info level it logs how many statistics hours a pull filled (only when it filled at least one); at warning
+level, a backfill skipped for lack of statistics metadata. Errors in a job are logged with a
 traceback at error level whatever the setting.
 
 View the log under **Settings > System > Logs**. Use the *Show raw logs* option to see debug lines.
@@ -328,7 +333,9 @@ View the log under **Settings > System > Logs**. Use the *Show raw logs* option 
 Open an issue with:
 
 - the version;
-- the model and firmware (shown in `sensor.radoneye_log_last_pull`'s detail attribute after a pull);
+- the model and firmware (the firmware is in `sensor.radoneye_log_last_pull`'s detail attribute after a pull;
+  both are in the `status` of a pull JSON file under `/config/reliable_radoneye/`);
+- the state of the **Counting window check** sensor;
 - what you see;
 - a debug log excerpt covering a few reads.
 

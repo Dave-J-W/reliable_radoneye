@@ -18,8 +18,9 @@ missed stay *missed*. See [Reliability](../../docs/reliability.md).
   a read after **+9:00**, so the two readers do not collide. Until a monitor's first good read it reads every
   5 minutes.
 - **One retry** 20 seconds after a failed read (if still before +9:00).
-- **Each read** scans for the monitor for up to 6 seconds, then connects and reads the status (`0x40` only),
-  all within a 15-second cap.
+- **Each read** scans for the monitor for up to 6 seconds, then connects, reads the status (`0x40` only) and
+  disconnects within a 15-second cap (the scan is not part of the cap, so one read takes at most about
+  21 seconds).
 - **A 24-hour ring** of captured windows per monitor, saved to `~/radon_counts/ring.json` of the service
   user after each new window, so it survives restarts. A corrupt ring file is renamed to `ring.json.bad` and
   a new one started.
