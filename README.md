@@ -44,7 +44,7 @@ Repair issue says so.
 ### HACS (custom repository)
 
 1. HACS > three-dot menu > **Custom repositories**.
-2. Add `https://github.com/<OWNER>/<REPO>` with category **Integration**.
+2. Add `https://github.com/Dave-J-W/reliable_radoneye` with category **Integration**.
 3. Install **RadonEye RD200 (counts)** and restart Home Assistant.
 
 ### Manual
