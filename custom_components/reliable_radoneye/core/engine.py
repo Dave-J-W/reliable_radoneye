@@ -8,7 +8,7 @@ Each monitor always has exactly one pending chain job (plus, in a parallel run, 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, tzinfo
+from datetime import datetime, timedelta, timezone, tzinfo
 
 from .radon_math import Derived, derive
 from .reliability import ReliabilityBlocks
@@ -67,6 +67,9 @@ class MonitorEngine:
         self.firmware: str | None = s.get("firmware")
         self.factor_log: list[dict] = list(s.get("factor_log", []))
         self.pull_date: str | None = s.get("pull_date")
+        # window ends (epoch s) already reported as a count conflict: the hourly backup re-fetch would repeat it
+        self.conflicts_warned: list[datetime] = [datetime.fromtimestamp(int(x), timezone.utc)
+                                                 for x in s.get("conflicts_warned", [])]
         old_k = s.get("k")
         if old_k is not None and float(old_k) != float(k):
             self.factor_log.append({"at": now_utc.isoformat(), "old": float(old_k), "new": float(k)})
@@ -196,7 +199,8 @@ class MonitorEngine:
         if changed:
             self._set_outcome(w.end_utc, "captured")
             acts.append(WriteWindow(self.serial, w, self.boot.boot_utc if w.source == "ha" else None))
-        if warning:
+        if warning and not any(abs(t - w.end_utc) < SAME_WINDOW for t in self.conflicts_warned):
+            self.conflicts_warned.append(w.end_utc)       # once per window, also across restarts
             acts.append(Notify(self.serial, "count_conflict", f"Radon {self.label}: {warning}"))
         return acts
 
@@ -292,8 +296,10 @@ class MonitorEngine:
     # ------------------------------------------------------------------ persistence
     def to_state(self, now: datetime) -> dict:
         self.log.prune(now - KEEP)
+        self.conflicts_warned = [t for t in self.conflicts_warned if t >= now - KEEP]
         self.outcomes = {k: v for k, v in self.outcomes.items() if datetime.fromisoformat(k) >= now - OUTCOMES_KEEP}
         return {"windows": self.log.to_rows(), "outcomes": self.outcomes,
                 "reliability": self.reliability.to_dict(), "validator": self.validator.to_dict(),
                 "firmware": self.firmware, "factor_log": self.factor_log, "pull_date": self.pull_date,
-                "k": self.k, "boot": self.boot.to_dict()}
+                "k": self.k, "boot": self.boot.to_dict(),
+                "conflicts_warned": [round(t.timestamp()) for t in self.conflicts_warned]}

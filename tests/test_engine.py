@@ -461,5 +461,33 @@ class LowRadonValidation(unittest.TestCase):                               # par
                     self.assertFalse([a for a in acts if isinstance(a, WriteWindow)])
 
 
+class ConflictOnce(unittest.TestCase):                                     # parked: hourly re-fetch re-warned
+    def conflicts(self, acts):
+        return [a for a in acts if isinstance(a, Notify) and a.kind == "count_conflict"]
+
+    def test_same_conflicting_backup_window_warns_once(self):
+        e = engine(backup=True)
+        simulate({"A1": e}, {"A1": dev()}, START, START + timedelta(hours=1))
+        w = e.log.all()[-1]                                                 # HA's copy: 2 counts
+        stale = Window(w.end_utc + timedelta(seconds=40), w.index, w.count + 3, "backup", w.read_at_utc)
+        now = START + timedelta(hours=1)
+        acts = []
+        for hour in range(3):                                               # the hub's hourly re-fetch
+            acts += e.on_backup([stale], now + timedelta(hours=hour))
+        self.assertEqual(len(self.conflicts(acts)), 1)
+        self.assertEqual(e.log.find(w.end_utc).source, "ha")               # HA's copy kept every time
+        state = json.loads(json.dumps(e.to_state(now + timedelta(hours=3))))   # survives a restart
+        e2 = engine(state=state, backup=True, now=now + timedelta(hours=3))
+        self.assertFalse(self.conflicts(e2.on_backup([stale], now + timedelta(hours=4))))
+
+    def test_warned_windows_pruned_with_the_window_log(self):
+        e = engine(backup=True)
+        simulate({"A1": e}, {"A1": dev()}, START, START + timedelta(hours=1))
+        w = e.log.all()[-1]
+        e.on_backup([Window(w.end_utc, w.index, w.count + 3, "backup", w.read_at_utc)], START + timedelta(hours=1))
+        self.assertEqual(len(e.to_state(START + timedelta(days=1))["conflicts_warned"]), 1)
+        self.assertEqual(e.to_state(START + timedelta(days=9))["conflicts_warned"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
