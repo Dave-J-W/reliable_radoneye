@@ -1,4 +1,4 @@
-"""Tests for custom_components/radoneye_log/protocol.py against real RD200V3 status packets.
+"""Tests for custom_components/reliable_radoneye/protocol.py against real RD200V3 status packets.
 
 Run with:
     python -m unittest discover -s tests -v
@@ -10,7 +10,7 @@ import importlib.util
 import pathlib
 import unittest
 
-_PATH = pathlib.Path(__file__).resolve().parents[1] / "custom_components/radoneye_log/protocol.py"
+_PATH = pathlib.Path(__file__).resolve().parents[1] / "custom_components/reliable_radoneye/protocol.py"
 _spec = importlib.util.spec_from_file_location("radoneye_protocol", _PATH)
 protocol = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(protocol)

@@ -9,8 +9,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "custom_components/radoneye_log/core"))   # windows.py, as deployed
-sys.path.insert(0, str(ROOT / "custom_components/radoneye_log"))        # protocol.py
+sys.path.insert(0, str(ROOT / "custom_components/reliable_radoneye/core"))   # windows.py, as deployed
+sys.path.insert(0, str(ROOT / "custom_components/reliable_radoneye"))        # protocol.py
 _spec = importlib.util.spec_from_file_location("rd200_counts", ROOT / "extras/backup_reader/rd200_counts.py")
 rc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rc)

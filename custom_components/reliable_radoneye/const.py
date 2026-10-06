@@ -1,6 +1,6 @@
-"""Constants shared by the HA side of radoneye_log."""
+"""Constants shared by the HA side of reliable_radoneye."""
 
-DOMAIN = "radoneye_log"
+DOMAIN = "reliable_radoneye"
 DEFAULT_FACTOR = 1.27                 # counts/h per Bq/m3, measured 2026-09-29/30 (spec)
 RADON_UNIT = "pCi/L"                  # MUST equal statistics_meta of sensor.fr_*_radon (plan Task 0 Step 1)
 SIGNAL_HUB = f"{DOMAIN}_hub"

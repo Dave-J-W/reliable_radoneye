@@ -20,8 +20,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
-import protocol   # custom_components/radoneye_log/protocol.py
-import windows    # custom_components/radoneye_log/core/windows.py
+import protocol   # custom_components/reliable_radoneye/protocol.py
+import windows    # custom_components/reliable_radoneye/core/windows.py
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.expanduser("~/radon_counts")

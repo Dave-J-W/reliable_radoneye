@@ -9,7 +9,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "custom_components/radoneye_log"))
+sys.path.insert(0, str(ROOT / "custom_components/reliable_radoneye"))
 from core import archive as A  # noqa: E402
 from core import windows as W  # noqa: E402
 

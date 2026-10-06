@@ -123,7 +123,7 @@ class RadonEyeSensor(SensorEntity):
 
 class LastPullSensor(RestoreEntity, SensorEntity):
     _attr_name = "RadonEye log last pull"
-    _attr_unique_id = "radoneye_log_last_pull"
+    _attr_unique_id = "reliable_radoneye_last_pull"
     _attr_icon = "mdi:radioactive"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_should_poll = False
@@ -158,7 +158,7 @@ class LastPullSensor(RestoreEntity, SensorEntity):
 
 class RadioShareSensor(SensorEntity):
     _attr_name = "RadonEye radio time share"
-    _attr_unique_id = "radoneye_log_radio_share"
+    _attr_unique_id = "reliable_radoneye_radio_share"
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_should_poll = False

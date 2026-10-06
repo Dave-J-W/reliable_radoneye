@@ -5,7 +5,7 @@ import sys
 from datetime import datetime, timedelta
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "custom_components/radoneye_log"))
+sys.path.insert(0, str(ROOT / "custom_components/reliable_radoneye"))
 from core.engine import ReadResult  # noqa: E402
 from core.schedule import JobQueue  # noqa: E402
 

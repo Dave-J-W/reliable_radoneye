@@ -9,7 +9,8 @@
 - Reliability reporting: first-attempt read success per 4 h block, window capture, missed windows, counts-vs-device ratio.
 - Live per-monitor window-model validator, re-tested every 24 h; device-values-only fallback and a Repair issue when the counting window is not recognised.
 - Honest staleness: device values become unavailable after 20 minutes without a good read.
-- Daily stored-log pull (after 06:00 local) that fills missing long-term radon statistics hours without overwriting; `radoneye_log.pull` service.
+- Daily stored-log pull (after 06:00 local) that fills missing long-term radon statistics hours without overwriting; `reliable_radoneye.pull` service.
 - Bluetooth discovery and config flow; RD200 v1 refused; options for label, k, backup reader URL and parallel run; one-time YAML import for migration from `rd200_ble`.
+- Integration domain is `reliable_radoneye` (matches the repository); archive directory is `/config/reliable_radoneye/`; external statistic ids are `reliable_radoneye:counts_<serial>`.
 - Persistent store of measurements, so restarts blank nothing that was measured.
 - Optional backup reader (`extras/backup_reader`) that fills windows Home Assistant missed.

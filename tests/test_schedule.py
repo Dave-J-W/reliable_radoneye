@@ -6,7 +6,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "custom_components/radoneye_log"))
+sys.path.insert(0, str(ROOT / "custom_components/reliable_radoneye"))
 from core import schedule as S  # noqa: E402
 
 R0 = datetime(2026, 9, 30, 12, 0, 20, tzinfo=timezone.utc)   # a computed rollover

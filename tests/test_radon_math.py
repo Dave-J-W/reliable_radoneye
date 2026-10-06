@@ -7,7 +7,7 @@ import time
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "custom_components/radoneye_log"))
+sys.path.insert(0, str(ROOT / "custom_components/reliable_radoneye"))
 from core import radon_math as M  # noqa: E402
 
 # Gehrels (1986) Table 1/2, 1-sigma (0.8413 one-sided) Poisson limits

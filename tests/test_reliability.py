@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "custom_components/radoneye_log"))
+sys.path.insert(0, str(ROOT / "custom_components/reliable_radoneye"))
 from core import reliability as R  # noqa: E402
 
 TZ = ZoneInfo("America/Chicago")

@@ -1,4 +1,4 @@
-"""Pull helpers for radoneye_log: write the raw RD200 log files, the pull/audit CSVs, and fill hours
+"""Pull helpers for reliable_radoneye: write the raw RD200 log files, the pull/audit CSVs, and fill hours
 missing from the long-term radon statistics.
 
 READ-ONLY on the monitors (status + history only). Never overwrites an existing statistics hour.
@@ -47,7 +47,7 @@ def write_files(out_dir, dev, status, history, read_at, points) -> None:
     stamp = read_at.strftime("%Y%m%dT%H%M%SZ")
     with open(f"{base}_{stamp}.json", "w", encoding="utf-8") as f:
         json.dump({"read_at_utc": read_at.isoformat(), "label": dev["label"], "status": status,
-                   "history": history, "source": "HA custom_components/radoneye_log"}, f, indent=1)
+                   "history": history, "source": "HA custom_components/reliable_radoneye"}, f, indent=1)
     with open(f"{base}_latest.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["data_no", "timestamp_utc", "timestamp_local", "radon_pci_l", "radon_bq_m3", "since_boot"])

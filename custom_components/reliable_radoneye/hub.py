@@ -69,7 +69,7 @@ class Hub:
         self.queue = JobQueue()
         self.radio = RadioTime()
         self.tz = ZoneInfo(hass.config.time_zone)
-        self.out_dir = hass.config.path("radoneye_logs")
+        self.out_dir = hass.config.path("reliable_radoneye")
         self.last_pull: dict = {}
         self._task: asyncio.Task | None = None
         self._loaded = False

@@ -19,7 +19,7 @@ Needs Python 3.11+ and a working BlueZ stack.
 sudo mkdir -p /opt/rd200 && sudo chown "$USER" /opt/rd200
 python3 -m venv /opt/rd200/venv && /opt/rd200/venv/bin/pip install bleak
 cp rd200_counts.py monitors.example.json /opt/rd200/
-cp ../../custom_components/radoneye_log/protocol.py ../../custom_components/radoneye_log/core/windows.py /opt/rd200/
+cp ../../custom_components/reliable_radoneye/protocol.py ../../custom_components/reliable_radoneye/core/windows.py /opt/rd200/
 cp /opt/rd200/monitors.example.json /opt/rd200/monitors.json   # then edit: your addresses, serials, labels
 sed "s/<USER>/$USER/" rd200-counts.service | sudo tee /etc/systemd/system/rd200-counts.service
 sudo systemctl daemon-reload && sudo systemctl enable --now rd200-counts

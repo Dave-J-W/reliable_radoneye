@@ -1,11 +1,11 @@
 """RadonEye RD200 (v2/v3) over Home Assistant's Bluetooth - spec docs/superpowers/specs/2026-09-30-radoneye-b-design.md.
 
 Each monitor is read ~every 5 min (aligned to its 10-min counting window, 3 attempts per read), its raw
-particle counts are archived exactly (/config/radoneye_logs/counts_*.csv + hourly external statistics),
+particle counts are archived exactly (/config/reliable_radoneye/counts_*.csv + hourly external statistics),
 and radon is derived from the counts with a Garwood interval. The stored hourly log is pulled once a day
 in a read slot after 06:00 and fills missing radon statistics hours (never overwrites). READ-ONLY.
 
-YAML (radoneye_log: devices:) is imported once into config entries, then a repair asks to remove it.
+YAML (reliable_radoneye: devices:) is imported once into config entries, then a repair asks to remove it.
 """
 
 from __future__ import annotations

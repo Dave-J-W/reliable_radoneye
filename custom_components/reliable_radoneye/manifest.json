@@ -1,6 +1,6 @@
 {
-  "domain": "radoneye_log",
-  "name": "RadonEye RD200",
+  "domain": "reliable_radoneye",
+  "name": "Reliable RadonEye",
   "bluetooth": [{"local_name": "FR:*", "connectable": true}],
   "codeowners": ["@Dave-J-W"],
   "config_flow": true,

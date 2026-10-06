@@ -1,4 +1,4 @@
-# RadonEye RD200 (counts) for Home Assistant
+# Reliable RadonEye for Home Assistant
 
 A Home Assistant custom integration for **RadonEye RD200 v2/v3** radon monitors. It reads them over Home
 Assistant's own Bluetooth and keeps the **raw particle counts** the monitor reports, not just its displayed
@@ -13,7 +13,7 @@ radon value.
   **every 5 minutes**, with retries. The monitor counts particles in **10-minute windows**; reads are aligned
   to those windows so each one is captured with plenty of margin (a first read about 1 minute after a window
   closes, a second chance at about 6 minutes).
-- **Archives the raw counts exactly**: one CSV row per captured window under `/config/radoneye_logs/`, and two
+- **Archives the raw counts exactly**: one CSV row per captured window under `/config/reliable_radoneye/`, and two
   hourly *external statistics* per monitor (counts, and windows captured), so exact counts survive any later
   change of the conversion factor.
 - **Derives radon from the counts**, with a 68 % exact Poisson (Garwood) confidence interval, over the last
@@ -45,11 +45,11 @@ Repair issue says so.
 
 1. HACS > three-dot menu > **Custom repositories**.
 2. Add `https://github.com/Dave-J-W/reliable_radoneye` with category **Integration**.
-3. Install **RadonEye RD200 (counts)** and restart Home Assistant.
+3. Install **Reliable RadonEye** and restart Home Assistant.
 
 ### Manual
 
-Copy the `custom_components/radoneye_log` folder into your Home Assistant `config/custom_components/`
+Copy the `custom_components/reliable_radoneye` folder into your Home Assistant `config/custom_components/`
 directory and restart.
 
 Requires Home Assistant 2026.9.0 or newer (the version this was verified on), the Bluetooth integration and
@@ -58,7 +58,7 @@ the Recorder.
 ## Setup
 
 Monitors are discovered automatically over Bluetooth. Open **Settings > Devices & services** and confirm the
-discovered monitor, or choose **Add integration > RadonEye RD200** and pick one from the list. Home Assistant
+discovered monitor, or choose **Add integration > Reliable RadonEye** and pick one from the list. Home Assistant
 connects once to read the serial number and model (v1 is refused). You can give the monitor a label; the
 default is the last 4 digits of its serial.
 
@@ -96,7 +96,7 @@ add a Bluetooth proxy).
 never shown as current. Counts-based values follow their own coverage rule instead; reliability and
 diagnostics always report. A monitor unreachable for an hour raises a persistent notification.
 
-The service `radoneye_log.pull` queues the stored-log pull for the next read slot (or runs it now with
+The service `reliable_radoneye.pull` queues the stored-log pull for the next read slot (or runs it now with
 `immediate: true`, which can collide with another reader).
 
 ## How radon is derived from counts
@@ -125,6 +125,8 @@ Home Assistant can fetch any it missed. Without it every feature works; only gap
 lost, and those windows are recorded as *not observed* rather than missed. See
 [extras/backup_reader/README.md](extras/backup_reader/README.md).
 
+> **Early adopters:** the pre-release version used the domain `radoneye_log`. Remove that integration (and its config entries) before installing this one; the two are not migrated automatically.
+
 ## Migrating from rd200_ble
 
 1. **Import.** Add the YAML below (once) and restart; the monitors appear as config entries. `statistic_id` is
@@ -132,7 +134,7 @@ lost, and those windows are recorded as *not observed* rather than missed. See
    integration's radon sensor). A Repair then asks you to remove the YAML; do so after checking the entries.
 
    ```yaml
-   radoneye_log:
+   reliable_radoneye:
      devices:
        - address: "AA:BB:CC:DD:EE:FF"
          serial: "XX01RE000001"
@@ -169,11 +171,11 @@ lost, and those windows are recorded as *not observed* rather than missed. See
 ## Credits
 
 The RD200 Bluetooth protocol knowledge comes from [sormy/radoneye](https://github.com/sormy/radoneye) (MIT,
-copyright Artem Butusov); its licence is included as `custom_components/radoneye_log/LICENSE-radoneye`.
+copyright Artem Butusov); its licence is included as `custom_components/reliable_radoneye/LICENSE-radoneye`.
 
 ## Development
 
-The decision logic is pure Python with no Home Assistant imports (`custom_components/radoneye_log/core/`) and
+The decision logic is pure Python with no Home Assistant imports (`custom_components/reliable_radoneye/core/`) and
 is unit- and simulation-tested. `protocol.py` imports `bleak`, so install it first:
 
     pip install bleak

@@ -8,7 +8,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "custom_components/radoneye_log"))
+sys.path.insert(0, str(ROOT / "custom_components/reliable_radoneye"))
 from core import windows as W  # noqa: E402
 
 T0 = datetime(2026, 9, 29, 17, 0, 30, tzinfo=timezone.utc)

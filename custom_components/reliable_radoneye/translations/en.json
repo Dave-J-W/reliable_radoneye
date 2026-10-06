@@ -2,7 +2,7 @@
   "config": {
     "flow_title": "{name}",
     "step": {
-      "user": {"title": "RadonEye RD200", "data": {"address": "Monitor"}},
+      "user": {"title": "Reliable RadonEye", "data": {"address": "Monitor"}},
       "confirm": {"title": "Add {name}", "description": "Home Assistant will connect once to check the model.", "data": {"label": "Label (default: last 4 digits of the serial)"}}
     },
     "error": {"cannot_connect": "Could not connect. Move closer or try again."},
@@ -27,7 +27,7 @@
     }
   },
   "issues": {
-    "remove_yaml": {"title": "Remove radoneye_log from YAML", "description": "The RadonEye monitors were imported from YAML. Check they appear under Settings → Devices & services → RadonEye RD200, then delete the `radoneye_log:` block from configuration (for example packages/radoneye_log.yaml)."},
+    "remove_yaml": {"title": "Remove reliable_radoneye from YAML", "description": "The RadonEye monitors were imported from YAML. Check they appear under Settings → Devices & services → Reliable RadonEye, then delete the `reliable_radoneye:` block from configuration (for example packages/reliable_radoneye.yaml)."},
     "window_not_recognised": {"title": "Radon {label}: counting window not recognised", "description": "This monitor's particle counts don't follow the 10-minute window seen on RD200V3 firmware V3.0.1, so counts-based radon is off. The device's own values are still read every 5 minutes."}
   },
   "services": {
