@@ -575,3 +575,19 @@ class FirmwareChangeWhileFailed(unittest.TestCase):                       # park
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FactorChanged(unittest.TestCase):
+    def factor_notes(self, e):
+        return [a for a in e.startup_actions() if isinstance(a, Notify) and a.kind == "factor_changed"]
+
+    def test_changed_k_yields_one_notify_once(self):
+        e = engine(state={"validator": PASSED, "k": 1.27}, k=2.0)
+        notes = self.factor_notes(e)
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0].message, "Radon A1: factor k changed from 1.27 to 2 counts/h per Bq/m³")
+        self.assertEqual(e.startup_actions(), [])                  # drained: a second call is empty
+
+    def test_same_k_or_no_stored_k_yields_none(self):
+        self.assertEqual(self.factor_notes(engine(state={"validator": PASSED, "k": 1.27}, k=1.27)), [])
+        self.assertEqual(self.factor_notes(engine(state={"validator": PASSED}, k=1.27)), [])

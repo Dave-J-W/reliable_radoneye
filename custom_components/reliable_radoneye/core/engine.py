@@ -70,9 +70,12 @@ class MonitorEngine:
         # window ends (epoch s) already reported as a count conflict: the hourly backup re-fetch would repeat it
         self.conflicts_warned: list[datetime] = [datetime.fromtimestamp(int(x), timezone.utc)
                                                  for x in s.get("conflicts_warned", [])]
+        self._startup: list = []                                     # actions owed at construction (startup_actions)
         old_k = s.get("k")
         if old_k is not None and float(old_k) != float(k):
             self.factor_log.append({"at": now_utc.isoformat(), "old": float(old_k), "new": float(k)})
+            self._startup.append(Notify(serial, "factor_changed", f"Radon {label}: factor k changed from "
+                                        f"{float(old_k):g} to {float(k):g} counts/h per Bq/m³"))
         self.k = float(k)
         self.boot = BootTracker(s.get("boot"))
         self.pull_requested = False                                  # request_pull(): next A is a pull, any hour
@@ -117,6 +120,11 @@ class MonitorEngine:
         """Free-mode job; the daily pull (or a requested one) rides on the first free slot that is due."""
         j = free_job(self.serial, at)
         return replace(j, kind="pull") if self._pull_due(at) else j
+
+    def startup_actions(self) -> list:
+        """Actions owed from construction (a changed factor k), returned once."""
+        acts, self._startup = self._startup, []
+        return acts
 
     def initial_jobs(self, now: datetime) -> list[Job]:
         return [free_job(self.serial, now)]

@@ -92,6 +92,8 @@ class Hub:
         mon = Monitor(entry.entry_id, d["address"], d["serial"], label, d.get("statistic_id"), backup_url,
                       parallel, eng)
         self.monitors[mon.serial] = mon
+        if (owed := eng.startup_actions()):
+            self.hass.async_create_task(self._apply(mon, owed))      # factor change: logbook only
         for job in eng.initial_jobs(now):
             self.queue.put(job)
         if self._task is None:
