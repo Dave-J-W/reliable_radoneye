@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+- The Bluetooth time cap now covers connect + read only; the disconnect is bounded separately (5 s) and can no longer discard a good read. Status reads are capped at 15 s and the daily pull at 23 s, so a connection is never held longer than 20 s / 28 s.
+- The window-model validator ignores uninformative 0 to 0 crossings, fixing a false validation failure at very low radon levels.
+- The count-conflict warning is raised at most once per window, including across restarts and the hourly backup re-fetch.
+- A firmware change while validation had failed now still clears the Repair issue.
+- More tests: capped_then_close cancellation and bounds, low-count longer windows, the crossing rule.
+
 ## 0.3.0
 
 - Reads RD200 v2/v3 over Home Assistant's Bluetooth about every 5 minutes, aligned to the monitor's 10-minute counting window, with retries and a 15 s cap per connection.
