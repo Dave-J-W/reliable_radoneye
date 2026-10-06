@@ -26,6 +26,26 @@
       }
     }
   },
+  "entity": {
+    "sensor": {
+      "radon": {"name": "Radon"},
+      "radon_1_day_level": {"name": "Radon 1-day level"},
+      "radon_1_month_level": {"name": "Radon 1-month level"},
+      "radon_peak": {"name": "Radon peak"},
+      "last_boot": {"name": "Last boot"},
+      "radon_counts_1h": {"name": "Radon (counts, 1 h)"},
+      "radon_counts_24h": {"name": "Radon (counts, 24 h)"},
+      "first_attempt_success_4h": {"name": "First-attempt read success (4 h)"},
+      "window_capture_24h": {"name": "Window capture (24 h)"},
+      "missed_windows_24h": {"name": "Missed windows (24 h)"},
+      "counts_device_ratio_7d": {"name": "Counts vs device (7 d)"},
+      "rssi": {"name": "Signal strength"},
+      "last_good_read": {"name": "Last good read"}
+    },
+    "binary_sensor": {
+      "backup_reachable": {"name": "Backup reader reachable"}
+    }
+  },
   "issues": {
     "remove_yaml": {"title": "Remove reliable_radoneye from YAML", "description": "The RadonEye monitors were imported from YAML. Check they appear under Settings → Devices & services → Reliable RadonEye, then delete the `reliable_radoneye:` block from configuration (for example packages/reliable_radoneye.yaml)."},
     "window_not_recognised": {"title": "Radon {label}: counting window not recognised", "description": "This monitor's particle counts don't follow the 10-minute window seen on RD200V3 firmware V3.0.1, so counts-based radon is off. The device's own values are still read every 5 minutes."}

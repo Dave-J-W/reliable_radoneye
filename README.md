@@ -73,7 +73,7 @@ Options (per monitor, **Configure**):
 
 ## Entities
 
-Per monitor (entity IDs look like `sensor.rd200_<label>_<key>`):
+Per monitor. Entity IDs are the standard Home Assistant ones, built from the device name ("Radon <label>") and the entity name. With the label `Upstairs`, for example: `sensor.radon_upstairs_radon`, `sensor.radon_upstairs_radon_1_day_level`, `sensor.radon_upstairs_radon_counts_1_h`, `sensor.radon_upstairs_first_attempt_read_success_4_h`, `sensor.radon_upstairs_window_capture_24_h` and `binary_sensor.radon_upstairs_backup_reader_reachable`. (Home Assistant keeps an ID once created, so changing the label later does not rename existing IDs.)
 
 | Entity | Meaning |
 |---|---|
@@ -142,19 +142,19 @@ lost, and those windows are recorded as *not observed* rather than missed. See
          statistic_id: sensor.your_old_radon_sensor
    ```
 
-2. **Parallel run.** The new entities use temporary IDs `sensor.rd200_<label>_*`. Disable polling on the old
+2. **Parallel run.** The new entities get the standard generated IDs (`sensor.radon_<label>_*`, see Entities). Disable polling on the old
    integration's config entries (Devices & services > entry > three-dot menu > *Disable polling for updates*)
    so only one client talks to each monitor; a monitor accepts a single connection at a time. Run both for a
    day or two and compare.
 3. **Entity-ID takeover (statistics continue).** Remove the old integration's config entries first, then
-   rename the new Radon, 1-day, 1-month and peak entities to the old entity IDs. Beforehand, check that the old
+   rename the new Radon, 1-day, 1-month and peak entities to the old entity IDs (a rename applies to whatever ID was generated, so this works the same for the standard IDs). Beforehand, check that the old
    statistics have the same unit (`pCi/L`), unit class and mean/sum type as the new entities.
 
    Rehearsal finding (Home Assistant 2026.9.4, disposable test sensors): renaming an entity onto an ID that
    already has statistics and state-history rows does not merge or overwrite anything; the recorder logs a
    warning and leaves the old rows alone. The old ID's statistics keep one row for every hour with no gap, the
    hour of the rename is a blend, and afterwards the old ID carries the new sensor's values. The new sensor's
-   earlier rows under its temporary ID stay orphaned (neither lost nor merged). Home Assistant may then show
+   earlier rows under its original generated ID stay orphaned (neither lost nor merged). Home Assistant may then show
    "orphaned statistics" or "state class removed" repairs; **do not accept any offer to delete**.
 4. Keep the old integration installed but unused for a couple of weeks so you can roll back.
 
