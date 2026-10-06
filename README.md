@@ -1,186 +1,162 @@
 # Reliable RadonEye for Home Assistant
 
 A Home Assistant custom integration for **RadonEye RD200 v2/v3** radon monitors. It reads them over Home
-Assistant's own Bluetooth and keeps the **raw particle counts** the monitor reports, not just its displayed
-radon value.
+Assistant's own Bluetooth (local adapters or ESPHome Bluetooth proxies), keeps the **raw particle counts** the
+monitor reports, and derives radon from those counts with an **honest uncertainty interval**.
 
-> Not affiliated with, endorsed by, or supported by Ecosense or FTLab. "RadonEye" is their product name.
-> This integration only **reads** from the monitor; it never writes settings or changes anything on the device.
+> **Not affiliated with, endorsed by, or supported by Ecosense or FTLab.** "RadonEye" and "RD200" are their
+> product names. This integration only **reads** from the monitor; it never changes a setting on the device.
 
-## What it does
+## Why it exists
 
-- Reads each monitor over Home Assistant's Bluetooth (local adapters or ESPHome Bluetooth proxies) about
-  **every 5 minutes**, with retries. The monitor counts particles in **10-minute windows**; reads are aligned
-  to those windows so each one is captured with plenty of margin (a first read about 1 minute after a window
-  closes, a second chance at about 6 minutes).
-- **Archives the raw counts exactly**: one CSV row per captured window under `/config/reliable_radoneye/`, and two
-  hourly *external statistics* per monitor (counts, and windows captured), so exact counts survive any later
-  change of the conversion factor.
-- **Derives radon from the counts**, with a 68 % exact Poisson (Garwood) confidence interval, over the last
-  1 h and 24 h.
-- Reports **read reliability** (first-attempt success per 4 h block, window capture, missed windows).
-- Pulls the monitor's stored hourly log once a day (after 06:00 local) and fills hours missing from the
-  long-term radon statistics. It never overwrites an existing hour.
-- Optionally cooperates with a **second reader** on another machine, so windows Home Assistant missed (for
-  example during a restart) can be filled in.
-- Handles any number of monitors from one integration, one Bluetooth connection at a time.
+The RD200 is a good detector with a fragile Bluetooth link. A radon integration that silently shows
+`unknown`, or keeps showing an old number as if it were new, is worse than no integration. Reliable RadonEye
+was built around three ideas:
 
-## Supported devices
+1. **Reliability first.** Reads are scheduled around the monitor's own 10-minute counting window, with
+   retries and a second chance in every window, so one failed read costs nothing.
+2. **Keep the raw data.** Every 10-minute particle count is archived exactly (CSV files and hourly
+   statistics). The radon value is derived from the counts, so changing the conversion factor later never
+   loses or distorts anything.
+3. **Be honest about uncertainty.** Counts-based radon comes with a 68 % confidence interval that is exact
+   even at very low counts. A value that is too old becomes `unavailable` rather than pretending to be current.
+
+### Compared with the community `rd200_ble` integration
+
+`rd200_ble` is the long-standing community integration for these monitors. The comparison below comes from a
+48-hour side-by-side run on two RD200V3 monitors (firmware V3.0.1) on one Home Assistant host, with
+`rd200_ble` 0.5.3. Your numbers will differ with your radio conditions.
+
+| | `rd200_ble` 0.5.3 | Reliable RadonEye |
+|---|---|---|
+| Read schedule | Every 10 min, one attempt, no retry | About every 5 min, aligned to the monitor's counting window; up to 3 attempts per read |
+| Successful reads (parallel run, 24 h) | About **66 %** on the weaker link, about 99 % on the stronger one | **100 %** of 10-minute windows captured on both monitors |
+| Radon shown as `unknown` | About **35 %** of its radon state changes (a parser bug after an early disconnect) | Not from read glitches; `unavailable` only after 20 min without any good read |
+| Raw particle counts | Live current/previous count sensors | Exact per-window archive (CSV + hourly statistics) |
+| Radon from counts, with uncertainty | No | 1 h and 24 h, exact Poisson (Garwood) 68 % interval |
+| Read-reliability reporting | No | First-attempt success (4 h), window capture, missed windows, radio time share |
+| Fills gaps in long-term statistics from the device's stored log | No | Daily, never overwrites |
+| Optional second reader on another machine | No | Yes (`extras/backup_reader`) |
+
+## Features
+
+- Bluetooth discovery and a UI config flow; RD200 v1 is detected and refused.
+- Reads about every 5 minutes, aligned to each monitor's 10-minute counting window: a first read about
+  1 minute after a window closes and a second chance about 5 minutes later, each with up to two retries.
+- Any number of monitors through one integration, served **one Bluetooth connection at a time**.
+- Exact raw-count archive: one CSV row per captured window under `/config/reliable_radoneye/`, plus two
+  hourly external statistics per monitor (`reliable_radoneye:counts_<serial>` and
+  `reliable_radoneye:windows_<serial>`).
+- Counts-based radon over 1 h and 24 h with lower/upper bounds, and a configurable conversion factor *k*.
+- The device's own values: latest radon, 1-day and 1-month averages, peak, last boot.
+- Reliability diagnostics: first-attempt read success per 4 h block (kept in long-term statistics), window
+  capture and missed windows over 24 h, a counts-vs-device check over 7 days, radio time share.
+- A live check, per monitor, that its counts really follow a 10-minute window before counts mode is used.
+- Daily pull of the device's stored hourly log that fills **missing** hours in the long-term radon
+  statistics (never overwrites); `reliable_radoneye.pull` service.
+- Honest staleness, persistent notifications for an unreachable monitor or an overloaded radio, and a Repair
+  issue for a monitor whose counting window is not recognised.
+- Everything is local. No cloud, no account.
+
+## Supported hardware
 
 | Device | Status |
 |---|---|
-| RD200 v2 / v3 (Bluetooth name `FR:*`) | supported |
-| RD200 v1 | refused (different protocol) |
-| Other RadonEye models | not supported |
+| RadonEye RD200 v3 (Bluetooth name `FR:...`) | Supported. Verified on firmware V3.0.1. |
+| RadonEye RD200 v2 (Bluetooth name `FR:...`) | Supported by the protocol code; not tested on real hardware. |
+| RadonEye RD200 v1 | Refused at setup (different Bluetooth protocol). |
+| Other RadonEye or Ecosense models | Not supported. |
 
-The 10-minute counting-window behaviour was measured on RD200V3 firmware V3.0.1. Other firmware is not
-assumed to behave the same: each monitor is checked **live** by a window-model validator (it needs at least
-20 same-window read pairs with no change, and every observed rollover at the expected time). Until it passes,
-a monitor works in *device-values-only* mode (unaligned 5-minute reads, no counts-based radon). If it fails, a
-Repair issue says so.
+Firmware other than V3.0.1 is not assumed to behave the same. Each monitor's counting window is checked live;
+until it passes, the monitor runs in **device-values-only** mode (see
+[Troubleshooting](docs/troubleshooting.md#counts-based-radon-stays-unavailable)).
 
-## Installation
+You also need a Bluetooth adapter on the Home Assistant host, or an ESPHome Bluetooth proxy that makes active
+connections, within reasonable range of each monitor. See [Installation](docs/installation.md).
 
-### HACS (custom repository)
+## Quick start (5 minutes)
 
-1. HACS > three-dot menu > **Custom repositories**.
-2. Add `https://github.com/Dave-J-W/reliable_radoneye` with category **Integration**.
-3. Install **Reliable RadonEye** and restart Home Assistant.
+1. **Install** through HACS as a custom repository (`https://github.com/Dave-J-W/reliable_radoneye`,
+   category *Integration*), or copy `custom_components/reliable_radoneye` into `/config/custom_components/`.
+   Restart Home Assistant.
+2. **Close the RadonEye phone app.** A monitor accepts one Bluetooth connection at a time.
+3. Open **Settings > Devices & services**. A discovered monitor appears as *Reliable RadonEye*; click
+   **Add**. (Or **Add integration > Reliable RadonEye** and pick the monitor from the list.)
+4. Optionally type a **label** such as `upstairs` (default: the last 4 characters of the serial) and
+   **Submit**. Home Assistant connects once to read the serial number and model.
+5. Within about 5 minutes `sensor.radon_upstairs_radon` shows the device's value. Counts-based radon
+   follows once the monitor's counting window has been verified, usually after **3 to 5 hours**.
 
-### Manual
+Migrating from `rd200_ble` and want to keep your history? Read
+[Migration from rd200_ble](docs/migration-from-rd200_ble.md) **before** step 3.
 
-Copy the `custom_components/reliable_radoneye` folder into your Home Assistant `config/custom_components/`
-directory and restart.
+## What you get
 
-Requires Home Assistant 2026.9.0 or newer (the version this was verified on), the Bluetooth integration and
-the Recorder.
+Per monitor, with the label `upstairs`:
 
-## Setup
+| Entity | Example entity ID | Notes |
+|---|---|---|
+| Radon | `sensor.radon_upstairs_radon` | Device's latest value, pCi/L |
+| Radon 1-day level / 1-month level / peak | `sensor.radon_upstairs_radon_1_day_level` ... | Device's own averages and peak |
+| Last boot | `sensor.radon_upstairs_last_boot` | When the monitor last restarted |
+| Radon (counts, 1 h) | `sensor.radon_upstairs_radon_counts_1_h` | Derived from 6 windows, with `lower`/`upper` |
+| Radon (counts, 24 h) | `sensor.radon_upstairs_radon_counts_24_h` | Derived from 144 windows, with `lower`/`upper` |
+| First-attempt read success (4 h) | `sensor.radon_upstairs_first_attempt_read_success_4_h` | Radio quality, % |
+| Window capture (24 h), Missed windows (24 h), Counts vs device (7 d) | `sensor.radon_upstairs_window_capture_24_h` ... | Diagnostics |
+| Signal strength, Last good read | `sensor.radon_upstairs_signal_strength` ... | Diagnostics, disabled by default |
+| Backup reader reachable | `binary_sensor.radon_upstairs_backup_reader_reachable` | Only with a backup reader URL |
 
-Monitors are discovered automatically over Bluetooth. Open **Settings > Devices & services** and confirm the
-discovered monitor, or choose **Add integration > Reliable RadonEye** and pick one from the list. Home Assistant
-connects once to read the serial number and model (v1 is refused). You can give the monitor a label; the
-default is the last 4 digits of its serial.
+Integration-wide: `sensor.radoneye_log_last_pull` (outcome of the daily log pull) and
+`sensor.radoneye_radio_time_share`. Full details in [Entities](docs/entities.md).
 
-Options (per monitor, **Configure**):
+## Documentation
 
-| Option | Meaning |
+| Guide | What it covers |
 |---|---|
-| Label | Used in the device name ("Radon <label>"), entity IDs and file names. |
-| Counts per hour per Bq/m³ (k) | Conversion factor for counts-based radon. Default 1.27. See below. |
-| Backup reader URL | Optional address of the backup reader, for example `http://backup-host.local:8765`. Empty means no requests are made. |
-| Parallel run | Also asks the older `rd200_ble` integration to refresh in its own time slot (only useful while migrating). |
+| [Installation](docs/installation.md) | Requirements, HACS and manual install, Bluetooth placement, upgrading, uninstalling |
+| [Configuration](docs/configuration.md) | Setup flow, every option, multiple monitors, YAML import, the `pull` service |
+| [Entities](docs/entities.md) | Every entity, attributes, availability, statistics, charting the hourly counts |
+| [Reliability](docs/reliability.md) | What the reliability numbers mean, what good looks like, improving a weak link |
+| [Migration from rd200_ble](docs/migration-from-rd200_ble.md) | Parallel run, taking over the old entity IDs with statistics intact, rollback |
+| [Troubleshooting](docs/troubleshooting.md) | Symptoms, causes and fixes; debug logging |
+| [FAQ](docs/faq.md) | Calibration, differences from the display, privacy, read-only guarantee |
+| [Backup reader](extras/backup_reader/README.md) | The optional second reader on another machine |
 
-## Entities
+Technical documentation for developers and the curious:
+[architecture](docs/technical/architecture.md), [the counts method](docs/technical/counts-method.md),
+[the Bluetooth protocol](docs/technical/protocol.md), [data formats](docs/technical/data-formats.md) and
+[development](docs/technical/development.md).
 
-Per monitor. Entity IDs are the standard Home Assistant ones, built from the device name ("Radon <label>") and the entity name. With the label `Upstairs`, for example: `sensor.radon_upstairs_radon`, `sensor.radon_upstairs_radon_1_day_level`, `sensor.radon_upstairs_radon_counts_1_h`, `sensor.radon_upstairs_first_attempt_read_success_4_h`, `sensor.radon_upstairs_window_capture_24_h` and `binary_sensor.radon_upstairs_backup_reader_reachable`. (Home Assistant keeps an ID once created, so changing the label later does not rename existing IDs.)
+## Limitations
 
-| Entity | Meaning |
-|---|---|
-| Radon | The device's latest value, pCi/L. |
-| Radon 1-day level, 1-month level, peak | The device's own averages and peak, pCi/L. Unknown for the first 60 minutes after the monitor reboots (it reports 0 then). |
-| Last boot | When the monitor last (re)started. Changes only on reboot. |
-| Radon (counts, 1 h) | Radon derived from the last 6 windows. Attributes `lower`, `upper` (68 % interval), `coverage`, `factor`. Unavailable below 4 of 6 windows. |
-| Radon (counts, 24 h) | The same over the last 144 windows. Unavailable below 120 of 144. No long-term statistics of its own (the hourly counts statistics cover that). |
-| First-attempt read success (4 h) | Percentage of scheduled reads that worked on the first try, for the **previous** fixed 4 h block (00/04/08/12/16/20 local). Kept in long-term statistics. |
-| Window capture (24 h), Missed windows (24 h), Counts vs device (7 d) | Diagnostics, recomputed hourly. The last compares counts-based radon with the device's own value; drift away from 1 suggests a mis-set k. |
-| Signal strength, Last good read | Diagnostics, disabled by default. |
-| Backup reader reachable | Binary sensor, only present when a backup reader URL is set. |
+- Verified only on **RD200V3, firmware V3.0.1**. Other firmware is validated live and falls back to
+  device values only if its counting window does not match.
+- At **zero radon** every window holds 0 counts, which cannot prove a 10-minute window, so counts mode stays
+  off (device values still work). At very low radon it can take many hours to switch on.
+- The **1 h** counts value is noisy by nature (often 15 to 30 % either way at typical indoor levels; see its
+  `lower`/`upper`). Use the 24 h value for trends.
+- A monitor accepts **one Bluetooth connection at a time**. The phone app, another integration or another
+  script reading the same monitor will collide with Home Assistant's reads.
+- The daily log pull and its gap-filling run only while a monitor is in counts mode, unless you call the
+  `pull` service with `immediate: true` (see [Configuration](docs/configuration.md#the-pull-service)).
+- The conversion factor *k* is a starting point measured on two units, not an independent calibration (see
+  the [FAQ](docs/faq.md#calibration-and-the-factor-k)).
+- Radon values are in pCi/L (1 pCi/L = 37 Bq/m³).
 
-Integration-wide: **RadonEye log last pull** (outcome of the daily log pull per monitor) and **RadonEye radio
-time share** (fraction of time spent on Bluetooth connections; above 50 % you get a notification, and should
-add a Bluetooth proxy).
+## Early adopters
 
-**Stale rule.** The device-value entities (Radon, 1-day, 1-month, peak) become `unavailable` after
-**20 minutes** without a good read, and after a Home Assistant restart until the first read. A stale value is
-never shown as current. Counts-based values follow their own coverage rule instead; reliability and
-diagnostics always report. A monitor unreachable for an hour raises a persistent notification.
+A pre-release version used the domain `radoneye_log`. Remove that integration and its config entries before
+installing this one; the two are not migrated automatically.
 
-The service `reliable_radoneye.pull` queues the stored-log pull for the next read slot (or runs it now with
-`immediate: true`, which can collide with another reader).
+## Credits and licence
 
-## How radon is derived from counts
-
-At normal indoor radon the detector produces only a handful of counts per 10-minute window (about 2 at
-10 Bq/m³). With N counts over T hours of captured windows:
-
-    radon (Bq/m³) = (N / T) / k        pCi/L = Bq/m³ / 37
-
-Missing windows shorten T; they never count as zero. The 68 % interval is the exact Poisson (Garwood)
-interval on N, scaled the same way, so it stays honest at low counts, including N = 0.
-
-**The factor k** is counts per hour per Bq/m³. The default **1.27** was measured on two units (1.27 and 1.28)
-by comparing counts per hour with the device's own Bq/m³ value. Treat it as a starting point: the device
-probably derives its value from the same counts, so this is a consistency check, not an independent
-calibration. To calibrate your own unit, run it next to a reference instrument for a few days and set
-k = (counts per hour) / (reference Bq/m³). Because the counts are stored, changing k re-scales every derived
-value and never touches the archive. Each change is logged.
-
-## Optional backup reader
-
-`extras/backup_reader/` contains a small stand-alone script for a second machine with its own Bluetooth radio
-(for example a Raspberry Pi). It reads the same monitors in the gaps between Home Assistant's reads (at +3:30
-and +8:30 of each window, never after +9:00), keeps the last 24 hours of windows, and serves them over HTTP so
-Home Assistant can fetch any it missed. Without it every feature works; only gap-filling after a restart is
-lost, and those windows are recorded as *not observed* rather than missed. See
-[extras/backup_reader/README.md](extras/backup_reader/README.md).
-
-> **Early adopters:** the pre-release version used the domain `radoneye_log`. Remove that integration (and its config entries) before installing this one; the two are not migrated automatically.
-
-## Migrating from rd200_ble
-
-1. **Import.** Add the YAML below (once) and restart; the monitors appear as config entries. `statistic_id` is
-   the entity whose long-term statistics the daily log pull should back-fill (for example the old
-   integration's radon sensor). A Repair then asks you to remove the YAML; do so after checking the entries.
-
-   ```yaml
-   reliable_radoneye:
-     devices:
-       - address: "AA:BB:CC:DD:EE:FF"
-         serial: "XX01RE000001"
-         label: "Upstairs"
-         statistic_id: sensor.your_old_radon_sensor
-   ```
-
-2. **Parallel run.** The new entities get the standard generated IDs (`sensor.radon_<label>_*`, see Entities). Disable polling on the old
-   integration's config entries (Devices & services > entry > three-dot menu > *Disable polling for updates*)
-   so only one client talks to each monitor; a monitor accepts a single connection at a time. Run both for a
-   day or two and compare.
-3. **Entity-ID takeover (statistics continue).** Remove the old integration's config entries first, then
-   rename the new Radon, 1-day, 1-month and peak entities to the old entity IDs (a rename applies to whatever ID was generated, so this works the same for the standard IDs). Beforehand, check that the old
-   statistics have the same unit (`pCi/L`), unit class and mean/sum type as the new entities.
-
-   Rehearsal finding (Home Assistant 2026.9.4, disposable test sensors): renaming an entity onto an ID that
-   already has statistics and state-history rows does not merge or overwrite anything; the recorder logs a
-   warning and leaves the old rows alone. The old ID's statistics keep one row for every hour with no gap, the
-   hour of the rename is a blend, and afterwards the old ID carries the new sensor's values. The new sensor's
-   earlier rows under its original generated ID stay orphaned (neither lost nor merged). Home Assistant may then show
-   "orphaned statistics" or "state class removed" repairs; **do not accept any offer to delete**.
-4. Keep the old integration installed but unused for a couple of weeks so you can roll back.
-
-## Known limitations
-
-- At very low radon, equal counts in adjacent windows are common, and the window validator can **falsely
-  fail** ("counting window not recognised"). It re-tests every 24 hours, so a transient failure is not a fault.
-- The 1 h counts value is noisy by nature (see its interval); use the 24 h value for trends.
-- A monitor accepts one Bluetooth connection at a time. Do not run the phone app, another integration or
-  another script against the same monitor during its read slots.
-- Verified only on RD200V3 firmware V3.0.1.
-- Not affiliated with Ecosense or FTLab.
-
-## Credits
-
-The RD200 Bluetooth protocol knowledge comes from [sormy/radoneye](https://github.com/sormy/radoneye) (MIT,
+The RD200 Bluetooth protocol code is adapted from [sormy/radoneye](https://github.com/sormy/radoneye) (MIT,
 copyright Artem Butusov); its licence is included as `custom_components/reliable_radoneye/LICENSE-radoneye`.
+The particle-count fields come from that project's protocol notes.
 
-## Development
+Reliable RadonEye is released under the MIT licence; see [LICENSE](LICENSE). Changes are listed in
+[CHANGELOG.md](CHANGELOG.md).
 
-The decision logic is pure Python with no Home Assistant imports (`custom_components/reliable_radoneye/core/`) and
-is unit- and simulation-tested. `protocol.py` imports `bleak`, so install it first:
-
-    pip install bleak
-    python -m unittest discover -s tests -t .
-
-## Licence
-
-MIT, see [LICENSE](LICENSE).
+This project is independent. It is not affiliated with, endorsed by, or supported by Ecosense, FTLab, or the
+authors of `rd200_ble`. It is not a certified radon measurement; for decisions about mitigation, follow your
+national radon guidance.
