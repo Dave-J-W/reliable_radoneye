@@ -319,9 +319,8 @@ recorded as `missed` becomes `captured` when the backup later supplies it.
 change after a save starts a 10-minute timer, and later changes before it fires are folded into the same
 write. The Store is therefore written **at most once per 10 minutes**, from whatever state the engines hold at
 that moment. Removing or reloading a config entry saves immediately and clears the flag. A changed *k* found at
-setup also calls `_save()` at once (`Hub.async_add`), but that is the same delayed save: the new `k` and its
-`factor_log` entry reach the file up to 10 minutes later, and a crash inside that interval would log the change
-again at the next start. On a clean shutdown,
+setup is saved immediately (`Hub.async_add` calls `store.async_save` and clears the flag), so the new `k` and its
+`factor_log` entry are never logged twice after a crash. On a clean shutdown,
 HA's final write flushes a pending delayed save.
 
 **Size.** Windows are stored as compact strings, `"end_epoch_s,index,count,h|b,read_at_epoch_s,device_bq"`.

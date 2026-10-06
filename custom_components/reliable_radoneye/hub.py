@@ -95,7 +95,10 @@ class Hub:
         self.monitors[mon.serial] = mon
         if (owed := eng.startup_actions()):
             self.hass.async_create_task(self._apply(mon, owed))      # factor change: logbook only
-            self._save()                                             # persist factor_log now: a crash must not log it twice
+            for s, m in self.monitors.items():  # persist factor_log now: a crash must not log it twice
+                self.data[s] = m.engine.to_state(now)
+            await self.store.async_save(self.data)
+            self._save_pending = False  # an immediate save cancels any pending delayed one
         for job in eng.initial_jobs(now):
             self.queue.put(job)
         if self._task is None:

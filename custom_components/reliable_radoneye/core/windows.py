@@ -163,7 +163,7 @@ class WindowValidator:
 
     Only INFORMATIVE crossings count, in `crossings` and `silent` alike: those where the old or the new
     `previous` is >= INFORMATIVE_MIN. A 0 -> 0 crossing looks the same whether or not the device rolled over,
-    and at low radon most windows hold 0 counts, so counting it made a real 10-min device fail (live 0200:
+    and at low radon most windows hold 0 counts, so counting it made a real 10-min device fail (a low-radon monitor in the original trial:
     6/21 silent at near-zero radon). The rule looks only at the two `previous` values, never at whether the
     crossing was silent, so it drops crossings alike under either model. Long-run silent share in simulation
     (tests/sim.FakeRD200, Poisson counts, 5-min free reads, 10 seeds x 100 h), counting all crossings ->
