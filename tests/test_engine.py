@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from tests.sim import FakeRD200, simulate
+from tests.sim import FakeRD200, poisson_counts, simulate
 from core.engine import MonitorEngine, WriteWindow, FetchBackup, Notify, ReadResult  # sim put core on sys.path
 from core.schedule import MIN_GAP, Job
 from core.windows import Window
@@ -427,6 +427,38 @@ class Parallel(unittest.TestCase):
                 windows = [(j.rollover - d.boot_utc).total_seconds() // 600 for j in par]
                 self.assertEqual(len(set(windows)), len(windows), (phase_s, windows))   # one poke per device window
                 self.assertGreaterEqual(len(par), 5, phase_s)
+
+
+class LowRadonValidation(unittest.TestCase):                               # parked: false fail at low radon
+    """Free-mode validation against seeded Poisson devices (tests/sim.poisson_counts)."""
+
+    def validate(self, window_min, mean_per_window, hours, seed):
+        e = engine(state={})                                                # fresh monitor: validator pending
+        d = FakeRD200("A1", START - timedelta(minutes=5003, seconds=20), poisson_counts(seed, mean_per_window),
+                      window_min=window_min)
+        acts, _ = simulate({"A1": e}, {"A1": d}, START, START + timedelta(hours=hours))
+        return e, acts
+
+    def test_low_radon_ten_minute_device_passes(self):
+        hours = []
+        for seed in range(10):                                              # 0.5 counts/window: 91 % of windows 0 or 1
+            with self.subTest(seed=seed):
+                e, acts = self.validate(10, 0.5, 14, seed)
+                self.assertEqual(e.validator.status, "passed", e.validator.to_dict())
+                self.assertFalse([a for a in acts if isinstance(a, Notify) and a.kind == "validation_failed"])
+                first_write = next(a for a in acts if isinstance(a, WriteWindow))   # counts mode from the pass on
+                hours.append((first_write.window.read_at_utc - START).total_seconds() / 3600)
+        self.assertLessEqual(sorted(hours)[8], 7, hours)                    # 9 of 10 within 7 h (a run of 1s: ~13 h)
+
+    def test_longer_windows_fail_at_moderate_counts(self):
+        for window_min in (20, 60):                                         # 2 counts per 10 min, like the trial
+            for seed in range(3):
+                with self.subTest(window_min=window_min, seed=seed):
+                    e, acts = self.validate(window_min, 2 * window_min / 10, 24, seed)
+                    self.assertEqual(e.validator.status, "failed", e.validator.to_dict())
+                    self.assertEqual(len([a for a in acts if isinstance(a, Notify)
+                                          and a.kind == "validation_failed"]), 1)
+                    self.assertFalse([a for a in acts if isinstance(a, WriteWindow)])
 
 
 if __name__ == "__main__":

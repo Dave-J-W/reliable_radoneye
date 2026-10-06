@@ -160,6 +160,18 @@ class WindowValidator:
     `previous` or a falling `current` is a violation. Adjacent-block pairs usually DO show one; a
     "silent" crossing (previous unchanged and current not falling) happens by chance for real 10-min
     windows (~10 % in the trial) but always for longer windows.
+
+    Only INFORMATIVE crossings count, in `crossings` and `silent` alike: those where the old or the new
+    `previous` is >= INFORMATIVE_MIN. A 0 -> 0 crossing looks the same whether or not the device rolled over,
+    and at low radon most windows hold 0 counts, so counting it made a real 10-min device fail (live 0200:
+    6/21 silent at near-zero radon). The rule looks only at the two `previous` values, never at whether the
+    crossing was silent, so it drops crossings alike under either model. Long-run silent share in simulation
+    (tests/sim.FakeRD200, Poisson counts, 5-min free reads, 10 seeds x 100 h), counting all crossings ->
+    this rule, at 0.2-4 counts per 10 min:  10-min windows 0.70-0.02 -> at most 0.16 (worst near 1 count
+    per window);  20-min 0.50-0.77 -> 0.45-0.51;  60-min 0.83-0.87 -> 0.82-0.83. The limit is 0.30.
+    Also ignoring crossings where both are 1 (INFORMATIVE_MIN = 2) pushes the 10-min share near 0, but lets
+    a low-count 20-min device fall to 0.34, close to the limit, and a 10-min device at 0.5 counts/window
+    needs a median ~17 h to validate instead of ~5 h.
     """
 
     MIN_SAME = 20
@@ -167,6 +179,7 @@ class WindowValidator:
     FAIL_VIOLATIONS = 3
     MIN_CROSS = 20
     MAX_SILENT_SHARE = 0.3
+    INFORMATIVE_MIN = 1             # a crossing counts only if the old or new `previous` is at least this
     FAIL_CROSS = 60
     RETEST_AFTER = timedelta(hours=24)   # a failed validation runs again from scratch this long after failing
 
@@ -200,7 +213,7 @@ class WindowValidator:
                 self.violations += 1
             else:
                 self.same_ok += 1
-        elif uptime_min // WINDOW_MIN == pu // WINDOW_MIN + 1:
+        elif uptime_min // WINDOW_MIN == pu // WINDOW_MIN + 1 and max(pp, previous) >= self.INFORMATIVE_MIN:
             self.crossings += 1
             if previous == pp and current >= pc:
                 self.silent += 1

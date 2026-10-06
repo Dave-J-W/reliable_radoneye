@@ -1,6 +1,8 @@
 """Fake RD200s and a fake clock for engine simulations (not a test module)."""
 
+import math
 import pathlib
+import random
 import sys
 from datetime import datetime, timedelta
 
@@ -10,18 +12,34 @@ from core.engine import ReadResult  # noqa: E402
 from core.schedule import JobQueue  # noqa: E402
 
 
-class FakeRD200:
-    """10-min windows rolling over at uptime = 0 (mod 10); window w holds counts_for(w) counts."""
+def poisson_counts(seed: int, mean: float):
+    """counts_for(w): a seeded, deterministic Poisson(mean) count per window (memoised, so repeat reads agree)."""
+    rng, drawn = random.Random(seed), []
 
-    def __init__(self, serial, boot_utc, counts_for=lambda w: 2, model="RD200V3", firmware="V3.0.1"):
+    def counts_for(w):
+        while len(drawn) <= w:                    # draw in window order, so the sequence depends on the seed only
+            k, p = 0, rng.random()
+            while p > math.exp(-mean):            # Knuth's method
+                k, p = k + 1, p * rng.random()
+            drawn.append(k)
+        return drawn[w]
+    return counts_for
+
+
+class FakeRD200:
+    """`window_min`-minute windows (the RD200: 10) rolling over at uptime = 0 (mod window_min); window w holds
+    counts_for(w) counts."""
+
+    def __init__(self, serial, boot_utc, counts_for=lambda w: 2, model="RD200V3", firmware="V3.0.1",
+                 window_min=10):
         self.serial, self.boot_utc, self.counts_for = serial, boot_utc, counts_for
-        self.model, self.firmware = model, firmware
+        self.model, self.firmware, self.window_min = model, firmware, window_min
 
     def status(self, now: datetime) -> dict:
         up_s = (now - self.boot_utc).total_seconds()
         u = int(up_s // 60)
-        w = u // 10
-        frac = (up_s / 60 - w * 10) / 10
+        w = u // self.window_min
+        frac = (up_s / 60 - w * self.window_min) / self.window_min
         return {"serial": self.serial, "model": self.model, "firmware_version": self.firmware,
                 "uptime_minutes": u, "counts_current": int(self.counts_for(w) * frac),
                 "counts_previous": self.counts_for(w - 1) if w >= 1 else 0,
