@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.2
+
+- The daily stored-log pull now also runs when the counting window check is pending or failed (it rides on the first free read slot after 06:00).
+- The pull log (`pull_log.csv`) attempts column is filled with the job's attempt number.
+- A changed factor k is written to the logbook once, and saved immediately so a crash cannot log it twice.
+- New diagnostic sensor "Counting window check" (pending, passed or failed).
+- Free-slot pulls no longer count toward read reliability, and a pull that fails every slot writes one FAILED logbook entry per day.
+- A static undefined-name check (`scripts/check_names.py`) runs in CI after the tests.
+
 ## 0.3.1
 
 - The Bluetooth time cap now covers connect + read only; the disconnect is bounded separately (5 s) and can no longer discard a good read. Status reads are capped at 15 s and the daily pull at 23 s, so a connection is never held longer than 20 s / 28 s.
