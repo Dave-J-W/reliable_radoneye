@@ -39,6 +39,7 @@
       "window_capture_24h": {"name": "Window capture (24 h)"},
       "missed_windows_24h": {"name": "Missed windows (24 h)"},
       "counts_device_ratio_7d": {"name": "Counts vs device (7 d)"},
+      "counts_mode": {"name": "Counting window check", "state": {"pending": "Pending", "passed": "Passed", "failed": "Failed"}},
       "rssi": {"name": "Signal strength"},
       "last_good_read": {"name": "Last good read"}
     },

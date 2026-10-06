@@ -37,6 +37,7 @@ class Spec:
     hourly: bool = False                # refresh only on the hourly signal
     enabled: bool = True
     precision: int | None = None
+    options: tuple | None = None        # ENUM sensors
 
 
 SPECS = [
@@ -51,6 +52,8 @@ SPECS = [
     Spec("window_capture_24h", "Window capture (24 h)", PERCENTAGE, diagnostic=True, hourly=True, precision=1),
     Spec("missed_windows_24h", "Missed windows (24 h)", diagnostic=True, hourly=True),
     Spec("counts_device_ratio_7d", "Counts vs device (7 d)", diagnostic=True, hourly=True, precision=3),
+    Spec("counts_mode", "Counting window check", device_class=SensorDeviceClass.ENUM, diagnostic=True,
+         options=("pending", "passed", "failed")),
     Spec("rssi", "Signal strength", SIGNAL_STRENGTH_DECIBELS_MILLIWATT, device_class=SensorDeviceClass.SIGNAL_STRENGTH,
          diagnostic=True, enabled=False),
     Spec("last_good_read", "Last good read", device_class=SensorDeviceClass.TIMESTAMP, diagnostic=True, enabled=False),
@@ -92,6 +95,8 @@ class RadonEyeSensor(SensorEntity):
         self._attr_device_class = spec.device_class
         self._attr_suggested_display_precision = spec.precision
         self._attr_entity_registry_enabled_default = spec.enabled
+        if spec.options:
+            self._attr_options = list(spec.options)
         if spec.diagnostic:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
