@@ -167,7 +167,11 @@ class MonitorEngine:
         fw = st.get("firmware_version")
         if fw and fw != self.firmware:
             if self.firmware is not None:
+                old = self.validator
                 self.validator = WindowValidator()       # new firmware: validate the window model again
+                if old.status == "failed" or old.failed_at is not None:
+                    # still a re-test: failed_at marks one, so a pass emits validation_passed (repair issue cleared)
+                    self.validator.failed_at = old.failed_at or t
             self.firmware = fw
         if self.boot.observe(t, u):
             acts.append(Notify(self.serial, "reboot", f"Radon {self.label} restarted (uptime {u} min)."))

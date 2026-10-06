@@ -489,5 +489,33 @@ class ConflictOnce(unittest.TestCase):                                     # par
         self.assertEqual(e.to_state(START + timedelta(days=9))["conflicts_warned"], [])
 
 
+class FirmwareChangeWhileFailed(unittest.TestCase):                       # parked: stale repair issue
+    FAILED = {"status": "failed", "same_ok": 5, "violations": 0, "crossings": 60, "silent": 25}
+
+    def run_firmware_update(self, validator):
+        e = engine(state={"validator": validator, "firmware": "V3.0.1"})
+        d = dev()
+        d.firmware = "V3.0.2"                                               # updated while HA was away
+        acts, _ = simulate({"A1": e}, {"A1": d}, START, START + timedelta(hours=10))
+        return e, [a.kind for a in acts if isinstance(a, Notify) and a.kind.startswith("validation")]
+
+    def test_pass_after_firmware_change_clears_the_failure(self):
+        failed = {**self.FAILED, "failed_at": (START - timedelta(hours=1)).isoformat()}   # re-test not yet due
+        e, kinds = self.run_firmware_update(failed)
+        self.assertEqual(e.firmware, "V3.0.2")
+        self.assertTrue(e.counts_mode)
+        self.assertEqual(kinds, ["validation_passed"])                      # the hub deletes the repair issue
+        self.assertIsNone(e.validator.failed_at)
+
+    def test_old_failed_state_without_failed_at_also_clears(self):
+        e, kinds = self.run_firmware_update(dict(self.FAILED))
+        self.assertEqual(kinds, ["validation_passed"])
+
+    def test_pass_after_firmware_change_from_passed_is_silent(self):
+        e, kinds = self.run_firmware_update(PASSED)
+        self.assertTrue(e.counts_mode)
+        self.assertEqual(kinds, [])                                         # no repair issue to clear
+
+
 if __name__ == "__main__":
     unittest.main()
