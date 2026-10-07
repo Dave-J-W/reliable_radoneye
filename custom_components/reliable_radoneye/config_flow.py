@@ -92,4 +92,4 @@ class RadonEyeOptionsFlow(OptionsFlow):
                 vol.All(vol.Coerce(float), vol.Range(min=0.01, max=100)),
             vol.Optional("backup_url", default=o.get("backup_url", "")): str,
             vol.Optional("parallel_with_rd200_ble", default=o.get("parallel_with_rd200_ble", False)): bool,
-        }))
+        }), description_placeholders={"example_url": "http://backup-host.local:8765"})

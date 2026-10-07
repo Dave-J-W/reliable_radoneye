@@ -20,8 +20,11 @@
         "data": {
           "label": "Label",
           "factor": "Counts per hour per Bq/m³ (k)",
-          "backup_url": "Backup reader URL (optional, e.g. http://backup-host.local:8765)",
+          "backup_url": "Backup reader URL (optional)",
           "parallel_with_rd200_ble": "Parallel run: read rd200_ble in its own slot"
+        },
+        "data_description": {
+          "backup_url": "Base URL of the optional backup reader, e.g. {example_url}"
         }
       }
     }
