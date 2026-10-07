@@ -11,7 +11,7 @@ function New-Icon([int]$size, [string]$path) {
     $g.Clear([System.Drawing.Color]::Transparent)
     $s = $size / 256.0
 
-    # Rounded square, calm teal
+    # Rounded square, red
     $m = 12 * $s; $w = $size - 2 * $m; $r = 52 * $s; $d = 2 * $r
     $p = New-Object System.Drawing.Drawing2D.GraphicsPath
     $p.AddArc($m, $m, $d, $d, 180, 90)
@@ -19,7 +19,7 @@ function New-Icon([int]$size, [string]$path) {
     $p.AddArc($m + $w - $d, $m + $w - $d, $d, $d, 0, 90)
     $p.AddArc($m, $m + $w - $d, $d, $d, 90, 90)
     $p.CloseFigure()
-    $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 26, 140, 140))), $p)
+    $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 198, 40, 40))), $p)
 
     # White "Rn"
     $white = [System.Drawing.Brushes]::White
