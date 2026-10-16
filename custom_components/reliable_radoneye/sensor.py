@@ -118,6 +118,8 @@ class RadonEyeSensor(SensorEntity):
             attrs = {"block_start": values["reliability_block_start"]}
         if self._spec.device_value:
             self._attr_available = not values["stale"]
+            if values.get("device_source"):          # "ha" | "backup" (revision 3); unrecorded
+                attrs["source"] = values["device_source"]
         elif self._spec.key.startswith("radon_counts"):
             self._attr_available = v is not None
         self._attr_native_value = v

@@ -22,6 +22,11 @@ DEVICE_AVG_MIN_UPTIME = 60
 KEEP = timedelta(days=8)
 DAY = timedelta(hours=24)
 OUTCOMES_KEEP = timedelta(hours=25)   # only the 24 h diagnostics read outcomes (final review I2)
+BACKUP_STATUS_AFTER = timedelta(minutes=7)    # ask the backup for device values once HA's last read is this old
+BACKUP_STATUS_EVERY = timedelta(minutes=5)    # ... and at most this often (revision 3)
+BOOT_MATCH = timedelta(minutes=3)             # a backup window belongs to the known boot if its index fits
+DEVICE_KEYS = ("uptime_minutes", "latest_bq_m3", "latest_pci_l", "day_avg_bq_m3", "day_avg_pci_l",
+               "month_avg_bq_m3", "month_avg_pci_l", "peak_bq_m3", "peak_pci_l")
 
 
 @dataclass
@@ -88,6 +93,15 @@ class MonitorEngine:
         self._poked: datetime | None = None                         # rollover of the last free-mode rd200_ble job
         self._end_before_start = self.log.latest_end()
         self._gap_checked = False
+        # Device values shown by entity_states (revision 3): the newest good read, HA's or the backup's.
+        # Persisted only as the "newer than" floor: after a restart nothing is shown until a read this run.
+        dv = s.get("device") or {}
+        self.device_at: datetime | None = (datetime.fromtimestamp(int(dv["at"]), timezone.utc)
+                                           if dv.get("at") is not None else None)
+        self.device_status: dict | None = dv.get("status")
+        self.device_source: str | None = dv.get("source")
+        self._device_this_run = False
+        self._backup_asked: datetime | None = None
 
     # ------------------------------------------------------------------ properties / helpers
     @property
@@ -199,6 +213,7 @@ class MonitorEngine:
             acts.append(Notify(self.serial, "validation_passed",
                                f"Radon {self.label}: counting window recognised on re-test; counts mode on."))
         self.last_good, self.last_status, self.rssi = t, st, res.rssi
+        self._set_device(st, t, "ha")
         self.anchor = last_rollover(t, u)
         if self.unreachable_notified:
             self.unreachable_notified = False
@@ -215,7 +230,7 @@ class MonitorEngine:
         acts: list = []
         if changed:
             self._set_outcome(w.end_utc, "captured")
-            acts.append(WriteWindow(self.serial, w, self.boot.boot_utc if w.source == "ha" else None))
+            acts.append(WriteWindow(self.serial, w, self._boot_of(w)))
         if warning and not any(abs(t - w.end_utc) < SAME_WINDOW for t in self.conflicts_warned):
             self.conflicts_warned.append(w.end_utc)       # once per window, also across restarts
             acts.append(Notify(self.serial, "count_conflict", f"Radon {self.label}: {warning}"))
@@ -245,20 +260,66 @@ class MonitorEngine:
         ends = [datetime.fromisoformat(k) for k, v in self.outcomes.items() if v == "missed"]
         return min((t for t in ends if now - DAY < t <= now), default=None)
 
+    def _boot_of(self, w: Window) -> datetime | None:
+        """boot_utc for the counts CSV. HA's windows: the current boot. A backup window: the current boot
+        only if its index fits it (boot + (index + 1) x 10 min = its end, within BOOT_MATCH); otherwise
+        (unknown boot, or the window is from another boot) None, i.e. an empty boot_utc in the CSV."""
+        b = self.boot.boot_utc
+        if w.source == "ha" or b is None:
+            return b
+        return b if abs(b + (w.index + 1) * TEN - w.end_utc) <= BOOT_MATCH else None
+
     def on_backup(self, windows: list[Window], now: datetime) -> list:
         acts: list = []
         for w in windows:
             acts += self._add_window(w)
         return acts
 
+    # ------------------------------------------------------------------ backup device values (revision 3)
+    def _set_device(self, status: dict, at: datetime, source: str) -> None:
+        self.device_status = {k: status[k] for k in DEVICE_KEYS if k in status}
+        self.device_at, self.device_source, self._device_this_run = at, source, True
+
+    def backup_status_due(self, now: datetime) -> bool:
+        """True (and noted) when the hub should ask the backup for device values: a backup is configured,
+        HA's own last good read (or, before one, the start) is older than BACKUP_STATUS_AFTER, and the last
+        ask is at least BACKUP_STATUS_EVERY ago."""
+        if not self.backup or now - (self.last_good or self.started) <= BACKUP_STATUS_AFTER:
+            return False
+        if self._backup_asked is not None and now - self._backup_asked < BACKUP_STATUS_EVERY:
+            return False
+        self._backup_asked = now
+        return True
+
+    def on_backup_status(self, status: dict, read_at_utc: datetime, now: datetime) -> bool:
+        """Accept the backup reader's latest device values when newer than every read so far (HA's, or a
+        persisted one) and not older than STALE_AFTER. Device values only: the anchor, boot tracker,
+        validator, reliability and windows never see it, so a backup clock never moves HA's schedule."""
+        if now - read_at_utc > STALE_AFTER:
+            return False
+        newest = max((t for t in (self.last_good, self.device_at) if t is not None), default=None)
+        if newest is not None and read_at_utc <= newest:
+            return False
+        if not all(k in status for k in ("uptime_minutes", "latest_pci_l")):
+            return False
+        self._set_device(status, read_at_utc, "backup")
+        return True
+
     # ------------------------------------------------------------------ periodic
     def check(self, now: datetime) -> list:
         ref = self.last_good or self.started
         if not self.unreachable_notified and now - ref > NOTIFY_UNREACHABLE_AFTER:
-            self.unreachable_notified = True
-            return [Notify(self.serial, "unreachable",
-                           f"Radon {self.label} has not been read since {ref:%Y-%m-%d %H:%M} UTC.")]
+            self.unreachable_notified = True                 # HA's own reads only: a backup never delays this
+            msg = f"Radon {self.label} has not been read since {ref:%Y-%m-%d %H:%M} UTC."
+            if self._device_fresh(now) and self.device_source == "backup":
+                msg = (f"Radon {self.label}: Home Assistant has not read it since {ref:%Y-%m-%d %H:%M} UTC; "
+                       f"the backup reader is covering the device values (last {self.device_at:%H:%M} UTC).")
+            return [Notify(self.serial, "unreachable", msg)]
         return []
+
+    def _device_fresh(self, now: datetime) -> bool:
+        return (self._device_this_run and self.device_at is not None and self.device_status is not None
+                and now - self.device_at <= STALE_AFTER)
 
     # ------------------------------------------------------------------ entity values
     def _latest_rollover(self, now: datetime) -> datetime | None:
@@ -288,8 +349,8 @@ class MonitorEngine:
                 "missed_windows_24h": miss, "counts_device_ratio_7d": ratio}
 
     def entity_states(self, now: datetime) -> dict:
-        stale = self.last_good is None or now - self.last_good > STALE_AFTER
-        st = self.last_status or {}
+        stale = not self._device_fresh(now)      # newest of HA's and the backup's reads (revision 3)
+        st = {} if stale else self.device_status
         young = int(st.get("uptime_minutes", 0)) < DEVICE_AVG_MIN_UPTIME
 
         def device(key: str, average: bool = False):
@@ -302,6 +363,7 @@ class MonitorEngine:
                "radon_1_day_level": device("day_avg_pci_l", True),
                "radon_1_month_level": device("month_avg_pci_l", True),
                "radon_peak": device("peak_pci_l", True),
+               "device_source": None if stale else self.device_source,
                "last_boot": self.boot.boot_utc, "rssi": self.rssi, "last_good_read": self.last_good,
                "radon_counts_1h": self._derived(now, 6, 4), "radon_counts_24h": self._derived(now, 144, 120),
                "first_attempt_success_4h": self.reliability.value(),
@@ -319,4 +381,6 @@ class MonitorEngine:
                 "reliability": self.reliability.to_dict(), "validator": self.validator.to_dict(),
                 "firmware": self.firmware, "factor_log": self.factor_log, "pull_date": self.pull_date,
                 "k": self.k, "boot": self.boot.to_dict(),
-                "conflicts_warned": [round(t.timestamp()) for t in self.conflicts_warned]}
+                "conflicts_warned": [round(t.timestamp()) for t in self.conflicts_warned],
+                "device": ({"at": round(self.device_at.timestamp()), "source": self.device_source,
+                            "status": self.device_status} if self.device_at is not None else None)}

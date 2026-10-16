@@ -6,6 +6,8 @@ Until a monitor's first good read it reads every 5 min. One retry 20 s after a f
 Keeps a 24 h ring of captured windows per monitor (ring.json, survives reboots) and serves it:
     GET :8765/windows?serial=<serial>&since=<UTC ISO>   -> [{end_utc, index, count, read_at_utc, ...}]
     GET :8765/status                                    -> monitors, pending slots, last results
+    GET :8765/latest?serial=<serial>                    -> last good read's device values, or 404
+The latest good read per monitor (device values, uptime, rssi) is kept in latest.json beside ring.json.
 Monitors from monitors.json: [{"address": ..., "serial": ..., "label": ...}]. No CSV files (spec decision 4).
 READ-ONLY on the monitors (0x40 only). Each connection capped at 15 s.
 Install with protocol.py and windows.py beside it; systemd unit rd200-counts.
@@ -27,6 +29,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.expanduser("~/radon_counts")
 MONITORS_FILE = os.path.join(HERE, "monitors.json")
 RING_FILE = os.path.join(DATA_DIR, "ring.json")
+LATEST_FILE = os.path.join(DATA_DIR, "latest.json")
+LATEST_KEYS = ("uptime_minutes", "latest_bq_m3", "latest_pci_l", "day_avg_bq_m3", "day_avg_pci_l",
+               "month_avg_bq_m3", "month_avg_pci_l", "peak_bq_m3", "peak_pci_l")
 PORT = 8765
 SLOTS = (timedelta(seconds=210), timedelta(seconds=510))
 LATEST_START = timedelta(seconds=540)
@@ -136,6 +141,47 @@ class Ring:
         os.replace(tmp, self.path)
 
 
+def latest_record(status: dict, rssi: int | None, read_at: datetime) -> dict:
+    """What GET /latest serves: the device values of one good read (no counts, no raw packet)."""
+    rec = {"read_at_utc": read_at.isoformat(), "rssi": rssi}
+    rec.update({k: status[k] for k in LATEST_KEYS if k in status})
+    return rec
+
+
+class Latest:
+    """Latest good read per monitor (serial upper-cased), persisted to its own file so ring.json is unchanged."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.by_serial: dict[str, dict] = {}
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    loaded = json.load(f)
+                if not isinstance(loaded, dict):
+                    raise ValueError("not an object")
+                self.by_serial = loaded
+            except (OSError, ValueError) as err:
+                _LOG.warning("latest %s unreadable (%s); starting empty", path, err)
+                try:
+                    os.replace(path, path + ".bad")
+                except OSError:
+                    pass
+
+    def set(self, serial: str, rec: dict) -> None:
+        self.by_serial[serial.upper()] = rec
+
+    def get(self, serial: str) -> dict | None:
+        return self.by_serial.get(serial.upper())
+
+    def save(self) -> None:
+        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+        tmp = self.path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(self.by_serial, f)
+        os.replace(tmp, self.path)
+
+
 # ---------------------------------------------------------------- Bluetooth
 
 async def read_status(address: str) -> tuple[dict, int | None]:
@@ -165,13 +211,35 @@ async def read_status(address: str) -> tuple[dict, int | None]:
 # ---------------------------------------------------------------- service
 
 class Service:
-    def __init__(self) -> None:
-        with open(MONITORS_FILE, encoding="utf-8") as f:
-            self.monitors = json.load(f)
+    def __init__(self, monitors: list | None = None, ring_path: str = RING_FILE,
+                 latest_path: str = LATEST_FILE) -> None:
+        if monitors is None:
+            with open(MONITORS_FILE, encoding="utf-8") as f:
+                monitors = json.load(f)
+        self.monitors = monitors
         start = datetime.now(timezone.utc)
         self.plans = {m["serial"]: SelfAlignedPlan(start) for m in self.monitors}
-        self.ring = Ring(RING_FILE)
+        self.ring = Ring(ring_path)
+        self.latest = Latest(latest_path)
         self.last: dict[str, dict] = {}
+
+    def route(self, method: str, target: str) -> tuple[int, object]:
+        url = urlparse(target)
+        q = {k: v[0] for k, v in parse_qs(url.query).items()}
+        if method == "GET" and url.path == "/windows" and q.get("serial"):
+            try:
+                since = parse_since(q.get("since", "1970-01-01T00:00:00+00:00"))
+                return 200, self.ring.since(q["serial"].upper(), since)
+            except ValueError as err:
+                return 400, {"ok": False, "error": f"bad since: {err}"}
+        if method == "GET" and url.path == "/status":
+            return 200, {"monitors": self.monitors, "last": self.last,
+                         "pending": {s: p.pending[0].isoformat() for s, p in self.plans.items()}}
+        if method == "GET" and url.path == "/latest" and q.get("serial"):
+            rec = self.latest.get(q["serial"])
+            if rec is not None:
+                return 200, rec
+        return 404, {"ok": False}
 
     async def handle_http(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
@@ -179,19 +247,7 @@ class Service:
             while (await asyncio.wait_for(reader.readline(), 5)) not in (b"\r\n", b"\n", b""):
                 pass
             method, target = (line + ["", ""])[:2]
-            url = urlparse(target)
-            q = {k: v[0] for k, v in parse_qs(url.query).items()}
-            if method == "GET" and url.path == "/windows" and q.get("serial"):
-                try:
-                    since = parse_since(q.get("since", "1970-01-01T00:00:00+00:00"))
-                    code, body = 200, self.ring.since(q["serial"].upper(), since)
-                except ValueError as err:
-                    code, body = 400, {"ok": False, "error": f"bad since: {err}"}
-            elif method == "GET" and url.path == "/status":
-                code, body = 200, {"monitors": self.monitors, "last": self.last,
-                                   "pending": {s: p.pending[0].isoformat() for s, p in self.plans.items()}}
-            else:
-                code, body = 404, {"ok": False}
+            code, body = self.route(method, target)
             data = json.dumps(body).encode()
             writer.write(f"HTTP/1.1 {code} X\r\nContent-Type: application/json\r\nContent-Length: {len(data)}\r\n"
                          f"Connection: close\r\n\r\n".encode() + data)
@@ -222,6 +278,8 @@ class Service:
                         w = windows.captured_window(now, u, int(status["counts_previous"]), "backup")
                         if w is not None and self.ring.add(mon["serial"], w):
                             self.ring.save()
+                        self.latest.set(mon["serial"], latest_record(status, rssi, now))
+                        self.latest.save()
                     self.last[mon["label"]] = {"at": now.isoformat(), "ok": ok, "attempt": attempt,
                                                "rssi": rssi, "uptime_minutes": u, "error": err}
                     _LOG.info("%s attempt %s ok=%s rssi=%s %s", mon["label"], attempt, ok, rssi, err or "")

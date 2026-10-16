@@ -165,6 +165,7 @@ class Staleness(unittest.TestCase):
         s = e.entity_states(START + timedelta(hours=9))
         self.assertTrue(s["stale"])
         self.assertIsNone(s["radon"])
+        self.assertIsNone(s["device_source"])
         self.assertEqual(s["first_attempt_success_4h"], 0.0)
         acts = e.check(START + timedelta(hours=9))
         self.assertTrue([a for a in acts if isinstance(a, Notify) and a.kind == "unreachable"]
@@ -596,6 +597,119 @@ class FactorChanged(unittest.TestCase):
     def test_same_k_or_no_stored_k_yields_none(self):
         self.assertEqual(self.factor_notes(engine(state={"validator": PASSED, "k": 1.27}, k=1.27)), [])
         self.assertEqual(self.factor_notes(engine(state={"validator": PASSED}, k=1.27)), [])
+
+
+def backup_status(t, uptime_min=5003, pci=0.5):
+    """What the backup reader's GET /latest serves (rd200_counts.latest_record)."""
+    return {"read_at_utc": t.isoformat(), "uptime_minutes": uptime_min, "latest_pci_l": pci, "latest_bq_m3": 18,
+            "day_avg_pci_l": 0.4, "day_avg_bq_m3": 15, "month_avg_pci_l": 0.35, "month_avg_bq_m3": 13,
+            "peak_pci_l": 2.5, "peak_bq_m3": 92, "rssi": -84}
+
+
+class BackupStatus(unittest.TestCase):                                    # revision 3: backup device values
+    def ha_then_dead(self, dead_min=40):
+        e, d = engine(backup=True), dev()
+        simulate({"A1": e}, {"A1": d}, START, START + timedelta(hours=2))
+        dead = START + timedelta(hours=2)
+        simulate({"A1": e}, {"A1": d}, dead, dead + timedelta(minutes=dead_min), fails=lambda s, t, j: True)
+        return e, d, dead
+
+    def test_backup_keeps_device_values_available_while_ha_reads_fail(self):
+        e, _, dead = self.ha_then_dead()
+        self.assertTrue(e.entity_states(dead + timedelta(minutes=40))["stale"])   # without the backup: unavailable
+        for m in range(3, 41, 5):                                              # backup reads at +3:30-ish, every 5 min
+            t = dead + timedelta(minutes=m)
+            self.assertTrue(e.on_backup_status(backup_status(t), t, t))
+            s = e.entity_states(t + timedelta(minutes=4))
+            self.assertFalse(s["stale"], m)
+            self.assertEqual(s["radon"], 0.5)
+            self.assertEqual(s["radon_1_day_level"], 0.4)
+            self.assertEqual(s["device_source"], "backup")
+
+    def test_backup_older_than_last_ha_read_or_stale_is_ignored(self):
+        e, d = engine(backup=True), dev()
+        simulate({"A1": e}, {"A1": d}, START, START + timedelta(hours=1))
+        ha = e.last_good
+        self.assertFalse(e.on_backup_status(backup_status(ha - timedelta(seconds=30)), ha - timedelta(seconds=30),
+                                            ha + timedelta(seconds=10)))
+        s = e.entity_states(ha + timedelta(seconds=10))
+        self.assertEqual((s["device_source"], s["radon"]), ("ha", 0.27))
+        old = ha + timedelta(minutes=1)
+        self.assertFalse(e.on_backup_status(backup_status(old), old, old + timedelta(minutes=21)))   # > STALE_AFTER
+        self.assertEqual(e.entity_states(ha + timedelta(minutes=2))["device_source"], "ha")
+
+    def test_ha_reads_resuming_switch_the_source_back(self):
+        e, d, dead = self.ha_then_dead()
+        t = dead + timedelta(minutes=38)
+        e.on_backup_status(backup_status(t), t, t)
+        self.assertEqual(e.entity_states(t)["device_source"], "backup")
+        back = dead + timedelta(minutes=40)
+        simulate({"A1": e}, {"A1": d}, back, back + timedelta(minutes=10))
+        s = e.entity_states(back + timedelta(minutes=10))
+        self.assertEqual((s["device_source"], s["radon"], s["stale"]), ("ha", 0.27, False))
+
+    def test_backup_never_moves_anchor_boot_validator_reliability_or_windows(self):
+        e, _, dead = self.ha_then_dead()
+        before = (e.anchor, e.last_good, e.rssi, e.boot.to_dict(), e.validator.to_dict(), e.reliability.to_dict(),
+                  e.log.to_rows(), dict(e.outcomes))
+        t = dead + timedelta(minutes=41, seconds=17)
+        self.assertTrue(e.on_backup_status(backup_status(t, uptime_min=3), t, t))   # even one showing a reboot
+        after = (e.anchor, e.last_good, e.rssi, e.boot.to_dict(), e.validator.to_dict(), e.reliability.to_dict(),
+                 e.log.to_rows(), dict(e.outcomes))
+        self.assertEqual(before, after)
+
+    def test_unreachable_still_notified_from_ha_reads_only_and_says_backup_covers(self):
+        e, _, dead = self.ha_then_dead(dead_min=70)
+        t = dead + timedelta(minutes=68)
+        e.on_backup_status(backup_status(t), t, t)
+        acts = e.check(dead + timedelta(minutes=70))
+        notes = [a for a in acts if isinstance(a, Notify) and a.kind == "unreachable"]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("backup reader", notes[0].message)
+
+    def test_backup_status_due_only_while_ha_reads_fail_and_throttled(self):
+        e, d = engine(backup=True), dev()
+        simulate({"A1": e}, {"A1": d}, START, START + timedelta(hours=1))
+        ha = e.last_good
+        self.assertFalse(e.backup_status_due(ha + timedelta(minutes=6)))
+        self.assertTrue(e.backup_status_due(ha + timedelta(minutes=8)))
+        self.assertFalse(e.backup_status_due(ha + timedelta(minutes=12)))         # asked 4 min ago
+        self.assertTrue(e.backup_status_due(ha + timedelta(minutes=13)))
+        self.assertFalse(engine(backup=False).backup_status_due(ha + timedelta(minutes=20)))
+
+    def test_state_round_trip_and_old_store(self):
+        e, _, dead = self.ha_then_dead()
+        t = dead + timedelta(minutes=38)
+        e.on_backup_status(backup_status(t), t, t)
+        state = json.loads(json.dumps(e.to_state(t)))
+        self.assertEqual(state["device"]["source"], "backup")
+        e2 = engine(state=state, backup=True, now=t + timedelta(minutes=1))
+        s = e2.entity_states(t + timedelta(minutes=1))
+        self.assertTrue(s["stale"])                       # spec: unavailable after a restart until the first read
+        self.assertIsNone(s["device_source"])
+        self.assertFalse(e2.on_backup_status(backup_status(t), t, t + timedelta(minutes=1)))   # not newer
+        t2 = t + timedelta(minutes=3)
+        self.assertTrue(e2.on_backup_status(backup_status(t2, pci=0.6), t2, t2))
+        self.assertEqual((e2.entity_states(t2)["radon"], e2.entity_states(t2)["device_source"]), (0.6, "backup"))
+        old = dict(state)
+        del old["device"]                                   # a Store written before revision 3
+        e3 = engine(state=old, backup=True, now=t)
+        self.assertIsNone(e3.entity_states(t)["device_source"])
+        self.assertTrue(e3.on_backup_status(backup_status(t), t, t))
+
+    def test_backup_window_gets_boot_utc_when_index_matches_current_boot(self):
+        e, d = engine(backup=True), dev()
+        simulate({"A1": e}, {"A1": d}, START, START + timedelta(hours=1))
+        boot, last = e.boot.boot_utc, e.log.find(e.anchor)
+        end = e.anchor + timedelta(minutes=20, seconds=-25)                      # backup's clock/rounding differs
+        t = end + timedelta(minutes=3, seconds=30)
+        w = Window(end, last.index + 2, 4, "backup", t)
+        writes = [a for a in e.on_backup([w], t) if isinstance(a, WriteWindow)]
+        self.assertEqual([a.boot_utc for a in writes], [boot])
+        t2 = t + timedelta(minutes=10)
+        bad = Window(w.end_utc + timedelta(minutes=10), w.index + 50, 4, "backup", t2)   # index from another boot
+        writes = [a for a in e.on_backup([bad], t2) if isinstance(a, WriteWindow)]
+        self.assertEqual([a.boot_utc for a in writes], [None])
 
 
 if __name__ == "__main__":

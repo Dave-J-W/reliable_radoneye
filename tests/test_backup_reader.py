@@ -95,5 +95,50 @@ class RingTests(unittest.TestCase):
             self.assertEqual(r2.since("S1", T), [])
 
 
+STATUS = {"serial": "S1", "model": "RD200", "firmware_version": "V3.0.1", "uptime_minutes": 5003,
+          "latest_bq_m3": 18, "latest_pci_l": 0.49, "day_avg_bq_m3": 15, "day_avg_pci_l": 0.41,
+          "month_avg_bq_m3": 13, "month_avg_pci_l": 0.35, "counts_current": 1, "counts_previous": 2,
+          "peak_bq_m3": 92, "peak_pci_l": 2.49, "raw_hex": "00ff"}
+
+
+class LatestTests(unittest.TestCase):                    # revision 3: device values for HA while its link fails
+    def test_record_keeps_device_values_uptime_rssi_and_time_only(self):
+        rec = rc.latest_record(STATUS, -84, T)
+        self.assertEqual(rec, {"read_at_utc": T.isoformat(), "uptime_minutes": 5003, "rssi": -84,
+                               "latest_bq_m3": 18, "latest_pci_l": 0.49, "day_avg_bq_m3": 15, "day_avg_pci_l": 0.41,
+                               "month_avg_bq_m3": 13, "month_avg_pci_l": 0.35, "peak_bq_m3": 92, "peak_pci_l": 2.49})
+
+    def test_persisted_beside_ring_and_missing_or_corrupt_file_is_empty(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "latest.json")
+            self.assertIsNone(rc.Latest(path).get("S1"))                       # no file yet (old installs)
+            lt = rc.Latest(path)
+            lt.set("s1", rc.latest_record(STATUS, -84, T))
+            lt.save()
+            self.assertEqual(rc.Latest(path).get("S1")["latest_pci_l"], 0.49)
+            with open(path, "w") as f:
+                f.write("[broken")
+            self.assertIsNone(rc.Latest(path).get("S1"))
+            self.assertTrue(os.path.exists(path + ".bad"))
+
+    def test_routes_latest_404_unknown_and_windows_status_unchanged(self):
+        with tempfile.TemporaryDirectory() as d:
+            mons = [{"address": "AA:BB", "serial": "S1", "label": "one"}]
+            svc = rc.Service(monitors=mons, ring_path=os.path.join(d, "ring.json"),
+                             latest_path=os.path.join(d, "latest.json"))
+            self.assertEqual(svc.route("GET", "/latest?serial=S1")[0], 404)     # nothing read yet
+            svc.latest.set("S1", rc.latest_record(STATUS, -84, T))
+            code, body = svc.route("GET", "/latest?serial=s1")
+            self.assertEqual((code, body["latest_pci_l"], body["read_at_utc"]), (200, 0.49, T.isoformat()))
+            self.assertEqual(svc.route("GET", "/latest?serial=NOPE")[0], 404)
+            self.assertEqual(svc.route("GET", "/latest")[0], 404)
+            svc.ring.add("S1", W.captured_window(T, 5003, 2, source="backup"))
+            code, body = svc.route("GET", "/windows?serial=S1&since=2026-10-01T00:00:00Z")
+            self.assertEqual((code, [r["count"] for r in body]), (200, [2]))
+            self.assertEqual(svc.route("GET", "/windows?serial=S1&since=junk")[0], 400)
+            code, body = svc.route("GET", "/status")
+            self.assertEqual((code, sorted(body)), (200, ["last", "monitors", "pending"]))
+
+
 if __name__ == "__main__":
     unittest.main()
