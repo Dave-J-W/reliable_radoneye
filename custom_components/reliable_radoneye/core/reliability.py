@@ -6,6 +6,8 @@ FIRST attempt succeeded. The value shown describes the previous fixed 4 h block 
 
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 BLOCK_HOURS = 4
@@ -72,3 +74,26 @@ class RadioTime:
     def share(self, now_utc: datetime, span: timedelta = timedelta(hours=1)) -> float:
         self._busy = [(e, s) for e, s in self._busy if e > now_utc - span]
         return round(100 * sum(s for _, s in self._busy) / span.total_seconds(), 1)
+
+
+@dataclass
+class ReadStreak:
+    """Failed BLE reads of one monitor, for the log (gap report 2026-10-14, fix 4): the first failure after
+    a success and the first success after failures are WARNING lines, everything else DEBUG."""
+
+    failures: int = 0
+    since: datetime | None = None
+
+    def observe(self, ok: bool, err: str | None, now: datetime, label: str) -> tuple[int, str | None]:
+        """(log level, message or None) for one attempt."""
+        if ok:
+            if not self.failures:
+                return logging.DEBUG, None
+            n, mins = self.failures, round((now - self.since).total_seconds() / 60)
+            self.failures, self.since = 0, None
+            return logging.WARNING, f"RadonEye {label}: read OK again after {n} failed attempts over {mins} min"
+        self.failures += 1
+        if self.failures == 1:
+            self.since = now
+            return logging.WARNING, f"RadonEye {label}: read failed ({err or 'no status'}); retrying"
+        return logging.DEBUG, f"RadonEye {label}: read failed again ({err or 'no status'}), {self.failures} in a row"

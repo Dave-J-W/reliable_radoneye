@@ -70,5 +70,22 @@ class Radio(unittest.TestCase):
         self.assertEqual(r.share(now), 2.0)
 
 
+class ReadFailureLog(unittest.TestCase):                 # failed reads at WARNING, once per streak (gap report fix 4)
+    def test_first_failure_and_recovery_warn_the_rest_debug(self):
+        import logging
+        s = R.ReadStreak()
+        t = datetime(2026, 10, 13, 20, 20, tzinfo=TZ)
+        self.assertEqual(s.observe(True, None, t, "0438"), (logging.DEBUG, None))      # success, no streak
+        lvl, msg = s.observe(False, "BleakError: not heard", t + timedelta(minutes=1), "0438")
+        self.assertEqual((lvl, msg), (logging.WARNING, "RadonEye 0438: read failed (BleakError: not heard); retrying"))
+        for i in range(2, 9):
+            lvl, _ = s.observe(False, "TimeoutError", t + timedelta(minutes=i * 5), "0438")
+            self.assertEqual(lvl, logging.DEBUG)
+        lvl, msg = s.observe(True, None, t + timedelta(minutes=40), "0438")
+        self.assertEqual((lvl, msg), (logging.WARNING, "RadonEye 0438: read OK again after 8 failed attempts over 39 min"))
+        self.assertEqual(s.observe(True, None, t + timedelta(minutes=45), "0438")[0], logging.DEBUG)
+        self.assertEqual(s.observe(False, None, t + timedelta(minutes=50), "0438")[0], logging.WARNING)  # new streak
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -28,7 +28,7 @@ from . import ble, pull, stats
 from .const import DEFAULT_FACTOR, DOMAIN, SIGNAL_HOURLY, SIGNAL_HUB, signal_monitor
 from .core.archive import append_window
 from .core.engine import FetchBackup, MonitorEngine, Notify, ReadResult, WriteWindow
-from .core.reliability import RadioTime
+from .core.reliability import RadioTime, ReadStreak
 from .core.schedule import CONNECT_CAP_S, PULL_CAP_S, Job, JobQueue, free_job
 from .core.windows import TEN, Window, hour_totals
 
@@ -49,6 +49,7 @@ class Monitor:
     parallel: bool
     engine: MonitorEngine
     backup_ok: bool | None = None
+    read_streak: ReadStreak = field(default_factory=ReadStreak)   # failed reads -> WARNING once per streak
     _states: dict | None = field(default=None, repr=False)
     _states_minute: datetime | None = None
 
@@ -184,6 +185,9 @@ class Hub:
         self.radio.add(now, dur)
         if self.monitors.get(mon.serial) is not mon:
             return  # removed or reloaded while connected: discard the result, queue nothing
+        level, line = mon.read_streak.observe(status is not None, err, now, mon.label)
+        if line:                               # first failure after a success, and the recovery: WARNING
+            _LOGGER.log(level, line)
         res = ReadResult(ok=status is not None, finished_utc=now, status=status, rssi=rssi, error=err, duration_s=dur)
         jobs, actions = mon.engine.on_result(job, res, now)
         for j in jobs:
