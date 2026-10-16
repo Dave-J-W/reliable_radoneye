@@ -141,6 +141,17 @@ class Ring:
         os.replace(tmp, self.path)
 
 
+def save_quietly(store, what: str) -> bool:
+    """store.save(), logged instead of raised: a disk error must not turn a good read into a failed one
+    (which would also re-time the plan)."""
+    try:
+        store.save()
+        return True
+    except Exception as err:  # noqa: BLE001
+        _LOG.error("saving %s failed: %s", what, err)
+        return False
+
+
 def latest_record(status: dict, rssi: int | None, read_at: datetime) -> dict:
     """What GET /latest serves: the device values of one good read (no counts, no raw packet)."""
     rec = {"read_at_utc": read_at.isoformat(), "rssi": rssi}
@@ -277,9 +288,9 @@ class Service:
                         u = int(status["uptime_minutes"])
                         w = windows.captured_window(now, u, int(status["counts_previous"]), "backup")
                         if w is not None and self.ring.add(mon["serial"], w):
-                            self.ring.save()
+                            save_quietly(self.ring, "ring")      # a failed save never fails a good read
                         self.latest.set(mon["serial"], latest_record(status, rssi, now))
-                        self.latest.save()
+                        save_quietly(self.latest, "latest")
                     self.last[mon["label"]] = {"at": now.isoformat(), "ok": ok, "attempt": attempt,
                                                "rssi": rssi, "uptime_minutes": u, "error": err}
                     _LOG.info("%s attempt %s ok=%s rssi=%s %s", mon["label"], attempt, ok, rssi, err or "")

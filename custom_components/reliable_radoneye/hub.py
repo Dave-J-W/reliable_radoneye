@@ -185,11 +185,12 @@ class Hub:
         self.radio.add(now, dur)
         if self.monitors.get(mon.serial) is not mon:
             return  # removed or reloaded while connected: discard the result, queue nothing
-        level, line = mon.read_streak.observe(status is not None, err, now, mon.label)
-        if line:                               # first failure after a success, and the recovery: WARNING
-            _LOGGER.log(level, line)
         res = ReadResult(ok=status is not None, finished_utc=now, status=status, rssi=rssi, error=err, duration_s=dur)
         jobs, actions = mon.engine.on_result(job, res, now)
+        retrying = any(j.kind == job.kind and j.attempt > job.attempt for j in jobs)
+        level, line = mon.read_streak.observe(res.ok, err, now, mon.label, retrying)
+        if line:                               # first failure after a success, and the recovery: WARNING
+            _LOGGER.log(level, line)
         for j in jobs:
             self.queue.put(j)
         await self._apply(mon, actions)
@@ -296,18 +297,16 @@ class Hub:
         """The backup reader's latest device values (GET /latest), while HA's own reads fail (revision 3)."""
         try:
             rec = await self._get_backup(mon, "/latest", {"serial": mon.serial})
-            read_at = datetime.fromisoformat(rec["read_at_utc"])
+            read_at = datetime.fromisoformat(rec["read_at_utc"])   # naive / bad values: refused by the engine
             mon.backup_ok = True
+            if self.monitors.get(mon.serial) is not mon:
+                return
+            if mon.engine.on_backup_status(rec, read_at, dt_util.utcnow()):
+                self._save()
         except Exception as err:  # noqa: BLE001 - a dead or malformed backup never affects reads
             # 404: the backup is up but has no good read of this monitor yet
             mon.backup_ok = isinstance(err, aiohttp.ClientResponseError) and err.status == 404
             _LOGGER.debug("RadonEye %s: backup reader /latest: %s", mon.label, err)
-            self._signal(mon)
-            return
-        if self.monitors.get(mon.serial) is not mon:
-            return
-        if mon.engine.on_backup_status(rec, read_at, dt_util.utcnow()):
-            self._save()
         self._signal(mon)
 
     async def _poke_rd200_ble(self, mon: Monitor) -> None:

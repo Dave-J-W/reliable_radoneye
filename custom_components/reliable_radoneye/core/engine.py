@@ -24,7 +24,8 @@ DAY = timedelta(hours=24)
 OUTCOMES_KEEP = timedelta(hours=25)   # only the 24 h diagnostics read outcomes (final review I2)
 BACKUP_STATUS_AFTER = timedelta(minutes=7)    # ask the backup for device values once HA's last read is this old
 BACKUP_STATUS_EVERY = timedelta(minutes=5)    # ... and at most this often (revision 3)
-BOOT_MATCH = timedelta(minutes=3)             # a backup window belongs to the known boot if its index fits
+BACKUP_MAX_AHEAD = timedelta(minutes=2)       # a backup read dated further ahead of HA's clock is refused
+BOOT_MATCH = timedelta(minutes=3)            # a backup window belongs to the known boot if its index fits
 DEVICE_KEYS = ("uptime_minutes", "latest_bq_m3", "latest_pci_l", "day_avg_bq_m3", "day_avg_pci_l",
                "month_avg_bq_m3", "month_avg_pci_l", "peak_bq_m3", "peak_pci_l")
 
@@ -96,8 +97,12 @@ class MonitorEngine:
         # Device values shown by entity_states (revision 3): the newest good read, HA's or the backup's.
         # Persisted only as the "newer than" floor: after a restart nothing is shown until a read this run.
         dv = s.get("device") or {}
-        self.device_at: datetime | None = (datetime.fromtimestamp(int(dv["at"]), timezone.utc)
-                                           if dv.get("at") is not None else None)
+        at = dv.get("at")          # ISO (full precision); whole epoch seconds in the first revision-3 Stores
+        self.device_at: datetime | None = (datetime.fromisoformat(at) if isinstance(at, str)
+                                           else datetime.fromtimestamp(int(at), timezone.utc) if at is not None
+                                           else None)
+        if self.device_at is not None and self.device_at - now_utc > BACKUP_MAX_AHEAD:
+            self.device_at = None                          # a future floor would block every backup read
         self.device_status: dict | None = dv.get("status")
         self.device_source: str | None = dv.get("source")
         self._device_this_run = False
@@ -295,12 +300,17 @@ class MonitorEngine:
         """Accept the backup reader's latest device values when newer than every read so far (HA's, or a
         persisted one) and not older than STALE_AFTER. Device values only: the anchor, boot tracker,
         validator, reliability and windows never see it, so a backup clock never moves HA's schedule."""
-        if now - read_at_utc > STALE_AFTER:
-            return False
+        if not isinstance(read_at_utc, datetime) or read_at_utc.tzinfo is None:
+            return False                                   # naive: cannot be ordered against HA's reads
+        if now - read_at_utc > STALE_AFTER or read_at_utc - now > BACKUP_MAX_AHEAD:
+            return False                                   # too old, or dated ahead (a fast backup clock)
         newest = max((t for t in (self.last_good, self.device_at) if t is not None), default=None)
         if newest is not None and read_at_utc <= newest:
             return False
-        if not all(k in status for k in ("uptime_minutes", "latest_pci_l")):
+        if not isinstance(status, dict) or not all(k in status for k in ("uptime_minutes", "latest_pci_l")):
+            return False
+        if not all(isinstance(status[k], (int, float)) and not isinstance(status[k], bool)
+                   for k in DEVICE_KEYS if k in status) or not isinstance(status["uptime_minutes"], int):
             return False
         self._set_device(status, read_at_utc, "backup")
         return True
@@ -382,5 +392,5 @@ class MonitorEngine:
                 "firmware": self.firmware, "factor_log": self.factor_log, "pull_date": self.pull_date,
                 "k": self.k, "boot": self.boot.to_dict(),
                 "conflicts_warned": [round(t.timestamp()) for t in self.conflicts_warned],
-                "device": ({"at": round(self.device_at.timestamp()), "source": self.device_source,
+                "device": ({"at": self.device_at.isoformat(), "source": self.device_source,
                             "status": self.device_status} if self.device_at is not None else None)}

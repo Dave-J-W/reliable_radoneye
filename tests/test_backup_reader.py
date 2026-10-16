@@ -121,6 +121,16 @@ class LatestTests(unittest.TestCase):                    # revision 3: device va
             self.assertIsNone(rc.Latest(path).get("S1"))
             self.assertTrue(os.path.exists(path + ".bad"))
 
+    def test_failed_save_is_logged_not_raised(self):                       # review: a good read stays good
+        class Broken:
+            def save(self):
+                raise OSError("disk full")
+        with self.assertLogs("rd200_backup", "ERROR") as logs:
+            self.assertFalse(rc.save_quietly(Broken(), "latest"))
+        self.assertIn("latest", logs.output[0])
+        with tempfile.TemporaryDirectory() as d:
+            self.assertTrue(rc.save_quietly(rc.Latest(os.path.join(d, "latest.json")), "latest"))
+
     def test_routes_latest_404_unknown_and_windows_status_unchanged(self):
         with tempfile.TemporaryDirectory() as d:
             mons = [{"address": "AA:BB", "serial": "S1", "label": "one"}]

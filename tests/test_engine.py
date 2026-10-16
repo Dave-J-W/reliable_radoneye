@@ -697,6 +697,50 @@ class BackupStatus(unittest.TestCase):                                    # revi
         self.assertIsNone(e3.entity_states(t)["device_source"])
         self.assertTrue(e3.on_backup_status(backup_status(t), t, t))
 
+    def test_future_dated_backup_rejected_beyond_two_minutes(self):           # review: fast backup-reader clock
+        e, _, dead = self.ha_then_dead()
+        now = dead + timedelta(minutes=30)
+        ahead = now + timedelta(minutes=5)
+        self.assertFalse(e.on_backup_status(backup_status(ahead), ahead, now))
+        self.assertNotEqual(e.entity_states(now)["device_source"], "backup")
+        near = now + timedelta(seconds=30)
+        self.assertTrue(e.on_backup_status(backup_status(near), near, now))
+        self.assertEqual(e.entity_states(now)["device_source"], "backup")
+
+    def test_naive_time_or_non_numeric_values_rejected(self):
+        e, _, dead = self.ha_then_dead()
+        now = dead + timedelta(minutes=30)
+        self.assertFalse(e.on_backup_status(backup_status(now), now.replace(tzinfo=None), now))
+        bad = dict(backup_status(now), latest_pci_l="0.5")
+        self.assertFalse(e.on_backup_status(bad, now, now))
+        bad = dict(backup_status(now), day_avg_pci_l=None)
+        self.assertFalse(e.on_backup_status(bad, now, now))
+        self.assertFalse(e.on_backup_status(dict(backup_status(now), uptime_minutes=True), now, now))
+        self.assertTrue(e.on_backup_status(backup_status(now), now, now))
+
+    def test_same_backup_record_not_reaccepted_after_restart(self):          # review: full-precision device_at
+        e, _, dead = self.ha_then_dead()
+        t = dead + timedelta(minutes=38, microseconds=600000)                 # would round UP to the next second
+        self.assertTrue(e.on_backup_status(backup_status(t), t, t))
+        t0 = t - timedelta(microseconds=200000)                               # would round DOWN
+        e0, _, _ = self.ha_then_dead()
+        self.assertTrue(e0.on_backup_status(backup_status(t0), t0, t0))
+        for eng, at in ((e, t), (e0, t0)):
+            e2 = engine(state=json.loads(json.dumps(eng.to_state(at))), backup=True, now=at)
+            self.assertEqual(e2.device_at, at)
+            self.assertFalse(e2.on_backup_status(backup_status(at), at, at + timedelta(seconds=5)))
+        old = json.loads(json.dumps(e.to_state(t)))
+        old["device"]["at"] = round(t.timestamp())                            # a Store from before this fix
+        self.assertEqual(engine(state=old, backup=True, now=t).device_at.timestamp(), round(t.timestamp()))
+
+    def test_young_monitor_blanks_backup_averages(self):                       # review: young rule from backup
+        e, _, dead = self.ha_then_dead()
+        t = dead + timedelta(minutes=30)
+        self.assertTrue(e.on_backup_status(backup_status(t, uptime_min=30), t, t))
+        s = e.entity_states(t)
+        self.assertEqual((s["radon"], s["device_source"]), (0.5, "backup"))
+        self.assertEqual((s["radon_1_day_level"], s["radon_1_month_level"], s["radon_peak"]), (None, None, None))
+
     def test_backup_window_gets_boot_utc_when_index_matches_current_boot(self):
         e, d = engine(backup=True), dev()
         simulate({"A1": e}, {"A1": d}, START, START + timedelta(hours=1))

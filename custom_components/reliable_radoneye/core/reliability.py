@@ -84,8 +84,9 @@ class ReadStreak:
     failures: int = 0
     since: datetime | None = None
 
-    def observe(self, ok: bool, err: str | None, now: datetime, label: str) -> tuple[int, str | None]:
-        """(log level, message or None) for one attempt."""
+    def observe(self, ok: bool, err: str | None, now: datetime, label: str,
+                retrying: bool = False) -> tuple[int, str | None]:
+        """(log level, message or None) for one attempt; `retrying`: a retry of this read is queued."""
         if ok:
             if not self.failures:
                 return logging.DEBUG, None
@@ -95,5 +96,6 @@ class ReadStreak:
         self.failures += 1
         if self.failures == 1:
             self.since = now
-            return logging.WARNING, f"RadonEye {label}: read failed ({err or 'no status'}); retrying"
+            tail = "; retrying" if retrying else ""
+            return logging.WARNING, f"RadonEye {label}: read failed ({err or 'no status'}){tail}"
         return logging.DEBUG, f"RadonEye {label}: read failed again ({err or 'no status'}), {self.failures} in a row"

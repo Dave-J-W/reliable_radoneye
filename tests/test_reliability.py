@@ -76,7 +76,7 @@ class ReadFailureLog(unittest.TestCase):                 # failed reads at WARNI
         s = R.ReadStreak()
         t = datetime(2026, 10, 13, 20, 20, tzinfo=TZ)
         self.assertEqual(s.observe(True, None, t, "0438"), (logging.DEBUG, None))      # success, no streak
-        lvl, msg = s.observe(False, "BleakError: not heard", t + timedelta(minutes=1), "0438")
+        lvl, msg = s.observe(False, "BleakError: not heard", t + timedelta(minutes=1), "0438", retrying=True)
         self.assertEqual((lvl, msg), (logging.WARNING, "RadonEye 0438: read failed (BleakError: not heard); retrying"))
         for i in range(2, 9):
             lvl, _ = s.observe(False, "TimeoutError", t + timedelta(minutes=i * 5), "0438")
@@ -84,7 +84,8 @@ class ReadFailureLog(unittest.TestCase):                 # failed reads at WARNI
         lvl, msg = s.observe(True, None, t + timedelta(minutes=40), "0438")
         self.assertEqual((lvl, msg), (logging.WARNING, "RadonEye 0438: read OK again after 8 failed attempts over 39 min"))
         self.assertEqual(s.observe(True, None, t + timedelta(minutes=45), "0438")[0], logging.DEBUG)
-        self.assertEqual(s.observe(False, None, t + timedelta(minutes=50), "0438")[0], logging.WARNING)  # new streak
+        self.assertEqual(s.observe(False, None, t + timedelta(minutes=50), "0438"),             # new streak,
+                         (logging.WARNING, "RadonEye 0438: read failed (no status)"))         # no retry queued
 
 
 if __name__ == "__main__":
