@@ -6,7 +6,7 @@ counts with an exact Poisson uncertainty. This document explains the counting wi
 window, the radon formula, the Garwood interval, the coverage rules, calibration of the factor *k*, and the
 live validator that decides whether a monitor's window model is the one this method assumes.
 
-Code: `core/windows.py`, `core/radon_math.py`, `core/engine.py`. Constants are quoted from version 0.3.2.
+Code: `core/windows.py`, `core/radon_math.py`, `core/engine.py`. Constants are quoted from version 0.4.0.
 
 ---
 
@@ -118,6 +118,8 @@ boots and an index restarts at every reboot.
 The engine turns a warning into a `count_conflict` notification **at most once per window**. The end times
 already warned about are persisted in `conflicts_warned`, so the hourly backup re-fetch cannot repeat it. A
 count conflict should never happen. If it does, it means a decoding or timing fault.
+
+The backup reader's `/latest` device values are not part of this at all: they never create, change or dedupe a window, and never feed the counts-based radon. A backup window's `boot_utc` in the CSV is filled only when its index fits the boot the engine currently knows (within 3 min), otherwise left empty.
 
 The **outcome** of each window (`captured`, `missed`, `not_observed`), kept for 25 h, feeds the diagnostics:
 

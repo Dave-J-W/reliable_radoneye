@@ -229,7 +229,7 @@ repository's releases, and `hacs.json` declares the minimum Home Assistant versi
 5. Tag the commit `vX.Y.Z` (annotated) and create a GitHub release from the tag, with the changelog section
    as its notes.
 
-No tags exist yet in the repository. 0.3.0, 0.3.1 and 0.3.2 were recorded in the changelog and the manifest
+No tags exist yet in the repository. 0.3.0, 0.3.1, 0.3.2 and 0.4.0 were recorded in the changelog and the manifest
 only.
 
 ---

@@ -56,7 +56,10 @@ The 20-minute rule applies only to the device values. Counts-based values follow
 reliability and diagnostic entities keep reporting, so you can see *why* the device values went away.
 
 If a monitor has not been read for **1 hour**, a persistent notification *Radon &lt;label&gt; has not been
-read since ...* appears; it is dismissed automatically at the next good read.
+read since ...* appears; it is dismissed automatically at the next good read. If a backup reader is covering
+the device values at that moment, the notification says so instead: *Home Assistant has not read it since ...;
+the backup reader is covering the device values (last HH:MM UTC)*. The notification still follows Home
+Assistant's own reads only; a backup never delays it.
 
 ## Device values
 
@@ -69,6 +72,27 @@ Bq/m³ integers to pCi/L with 2 decimals. They are read at every good read, so t
 changes only when the monitor restarts (a restart is also written to the logbook: *Radon upstairs restarted
 (uptime 3 min)*). After a restart the monitor's window numbering starts again and its averages are unknown
 for an hour.
+
+### Device values from the backup reader
+
+With a [backup reader](../extras/backup_reader/README.md) configured, the four device-value sensors stay
+available while Home Assistant's own Bluetooth reads fail. Once Home Assistant's last good read is more than
+7 minutes old it asks the backup reader's `GET /latest?serial=` (at most every 5 minutes) for the monitor's
+latest good read. These sensors then carry an extra attribute, not stored in the recorder's history:
+
+| `source` | Meaning |
+|---|---|
+| `ha` | The value came from Home Assistant's own read |
+| `backup` | The value came from the backup reader's read |
+
+A backup value is accepted only if it is newer than any read so far, under 20 minutes old, and no more than
+2 minutes in the future (clock-skew guard). It feeds the device-value sensors only: never the counts-based
+radon, the window archive, the reliability numbers or the Last good read / Last boot logic. Counts still come
+only through the window path. The 1-day, 1-month and peak values are blanked for the first hour after a
+monitor restarts, exactly as for Home Assistant's own reads.
+
+If the attribute shows `backup` often, Home Assistant's radio link to the monitor is weak; see
+[Troubleshooting](troubleshooting.md#radon-showed-source-backup).
 
 ## Counts-based radon
 
@@ -125,7 +149,8 @@ scheduled A/B reads, and a daily pull made on an unaligned read is not counted).
   and that no backup supplied.
 - **Counts vs device (7 d)**: the mean counts-based radon over the last 7 days of windows divided by the mean
   of the device's own latest value at the reads that captured them (needs at least 144 such windows, otherwise
-  `unknown`; windows from the backup reader carry no device value and are left out). Close to 1 means *k* and
+  `unknown`; windows from the backup reader carry no device value and are left out, and device values taken
+  from the backup reader's `/latest` are never used here). Close to 1 means *k* and
 the device   agree; see the [FAQ](faq.md#calibration-and-the-factor-k).
 - **Signal strength** (disabled by default): the RSSI in dBm of the monitor's advertisement as last heard by
   Home Assistant's Bluetooth, taken at each read. Enable it under the device page if you are working on

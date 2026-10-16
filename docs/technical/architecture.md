@@ -2,7 +2,7 @@
 
 This document describes how Reliable RadonEye (domain `reliable_radoneye`) is built. It covers the module
 layout, the data flow, the read scheduler, retries and deadlines, persistence and failure isolation. Every
-number here is taken from the code at version 0.3.2. Where the original design spec says something different,
+number here is taken from the code at version 0.4.0. Where the original design spec says something different,
 the difference is noted.
 
 Related documents: [counts-method.md](counts-method.md) (the measurement), [protocol.md](protocol.md) (the
@@ -61,7 +61,7 @@ the config flow) only *execute* what the core decides.
 | `core/schedule.py` | pure | Slot offsets (A +1:00, B +6:00, parallel +4:30), retry delays, session caps, the `Job` record, and `JobQueue` (earliest deadline first, integration-wide). |
 | `core/windows.py` | pure, standalone | `Window` (identity, compact Store row), `captured_window` (which window a read captures), `WindowLog` (dedupe and merge), `hour_totals`, `BootTracker` (reboot detection), and `WindowValidator` (checks the window model live). |
 | `core/radon_math.py` | pure | The Poisson CDF, the Garwood interval (cached), `derive` (radon from counts, with coverage), and `counts_from_hourly_mean`. |
-| `core/reliability.py` | pure | `ReliabilityBlocks` (first-attempt success per fixed 4 h local block) and `RadioTime` (share of the last hour spent connected). |
+| `core/reliability.py` | pure | `ReliabilityBlocks` (first-attempt success per fixed 4 h local block) and `RadioTime` (share of the last hour spent connected). `ReadStreak` (failed reads of one monitor, for the log: WARNING on the first failure after a success and on the first success after failures, DEBUG otherwise). |
 | `core/timing.py` | pure (asyncio) | `capped_then_close`: caps connect + read, then always runs the disconnect under its own cap. |
 | `core/archive.py` | pure (file I/O) | Appends one row per captured window to the daily count CSV. |
 | `hub.py` | HA | `Hub`: one background task serves the queue. It runs BLE sessions and applies actions: CSV, external statistics, notifications, repair issues, logbook entries, backup-reader HTTP. It owns the `Store`. |
@@ -92,6 +92,8 @@ flowchart LR
     A -->|WriteWindow| ST[(external statistics<br/>counts_ / windows_)]
     A -->|FetchBackup| BR[backup reader HTTP]
     BR -->|windows| E2[MonitorEngine.on_backup] --> A
+    A -->|"minute tick, HA reads failing"| BL[backup reader /latest]
+    BL -->|device values| E3[MonitorEngine.on_backup_status] --> S
     A -->|Notify| N[persistent notification /<br/>repair issue / logbook]
     H -->|pull jobs| P[pull.py: files, pull_log,<br/>backfill radon statistics]
     E -->|entity_states| S[sensor entities]
@@ -151,6 +153,7 @@ _run():
 
 `_each_minute` does the following:
 
+- when a backup reader is configured and `engine.backup_status_due(now)` is true (HA's last good read is more than 7 min old, and the last ask at least 5 min ago), starts a fire-and-forget `_fetch_latest` (`GET /latest?serial=`, 5 s timeout);
 - runs `engine.check(now)`, which raises the "unreachable" notification after 1 h without a good read, and
   signals every monitor;
 - computes the radio share. Above 50 % it raises a persistent notification ("add a Bluetooth proxy"), and
@@ -367,6 +370,7 @@ entry) therefore blanks nothing that had been measured.
 | An unexpected exception in a job | `_run` logs it and queues a recovery `free` job if the chain is gone. The loop continues. |
 | An exception in the loop itself | Logged; the loop sleeps 5 s and continues. |
 | Pull bookkeeping (files, recorder) fails | Logged and swallowed. The read result has already been applied. |
+| HA's own reads fail while a backup reader is configured | After 7 min the hub asks `/latest` (at most every 5 min). `on_backup_status` accepts the record only if it is newer than every read so far (HA's `last_good` and the stored `device_at`), at most `STALE_AFTER` (20 min) old, and at most `BACKUP_MAX_AHEAD` (2 min) in the future of HA's clock, with a timezone-aware time and numeric values. It sets only `device_status`, `device_at` and `device_source = "backup"`, so only the device-value entities (and their `source` attribute) change. The anchor, boot tracker, validator, reliability blocks and window log are untouched, so counts still come only through `FetchBackup` / `on_backup`. The `unreachable` check still follows `last_good`; its text says the backup is covering. The parse and `on_backup_status` call sit inside the hub's try, so a malformed reply only sets `backup_ok`. |
 | The backup reader is down, slow or malformed | The fetch runs outside the queue as its own task with a 5 s timeout. It only sets `backup_ok = False`, which the `Backup reader reachable` sensor shows. Reads are never delayed. |
 | A monitor is unreachable | Device values become `unavailable` after 20 min, and a persistent notification is raised after 1 h. The notification is dismissed on the next good read. Other monitors are served normally, and its failing jobs only consume their own caps. |
 | The window model is not recognised | That monitor runs device-values-only with free reads (the daily pull still rides on a free slot), and a repair issue `window_not_recognised_<serial>` is raised. The *Counting window check* sensor shows `failed`. The validator is re-tested 24 h later. |

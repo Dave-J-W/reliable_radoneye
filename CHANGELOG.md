@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0
+
+- With a backup reader, the device-value sensors (radon, 1-day, 1-month, peak) stay available while Home Assistant's own Bluetooth reads fail. They take the backup reader's latest good read and show `source: backup` (`ha` otherwise). Counts still come only through the window path.
+- A backup value is accepted only if it is newer than any read so far, under 20 minutes old, and no more than 2 minutes in the future (clock-skew guard). It never feeds the counts, the archive or the reliability numbers.
+- The backup reader keeps each monitor's latest good read in `latest.json` and serves it at `GET /latest?serial=` (404 if none). Home Assistant asks once its own last read is more than 7 minutes old, at most every 5 minutes.
+- The "has not been read" notification still follows Home Assistant's own reads, and now says when the backup is covering.
+- Backup windows get `boot_utc` in the counts CSV when their window index fits the current boot.
+- Failed reads are logged at WARNING once per failure streak: on the first failed attempt after a success and on the first success after failures (`read OK again after N failed attempts over M min`). Other failures stay at DEBUG.
+- A saved device read dated in the future is dropped on load, and the stored device read time keeps full precision.
+- Backup reader: a failed save of `ring.json` or `latest.json` is logged and never fails a good read.
+
 ## 0.3.2
 
 - The daily stored-log pull now also runs when the counting window check is pending or failed (it rides on the first free read slot after 06:00).

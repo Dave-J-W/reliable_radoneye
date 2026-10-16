@@ -33,6 +33,38 @@ uses it:
 So a window is lost only if up to six attempts from Home Assistant **and** the backup reader all fail. Details
 in [Configuration](configuration.md#read-schedule).
 
+### Device values while Home Assistant's reads fail
+
+The backup reader also keeps each monitor's latest good read. While Home Assistant's own reads of a monitor
+are failing, the device-value sensors (radon, 1-day, 1-month, peak) take their values from it instead of
+going `unavailable`, and their `source` attribute shows `backup`. This changes only those sensors. Counts
+still come only through the window path, and the reliability numbers below count only Home Assistant's own
+reads. A backup value is accepted only if it is newer than any read so far, under 20 minutes old and no more
+than 2 minutes in the future. The "has not been read" notification still follows Home Assistant's own reads
+and says when the backup is covering. See
+[Entities](entities.md#device-values-from-the-backup-reader).
+
+### Reading the log
+
+Failed reads are logged at WARNING level, once per failure streak, so a bad spell shows up in the default log
+without filling it:
+
+```text
+RadonEye upstairs: read failed (TimeoutError); retrying
+RadonEye upstairs: read OK again after 3 failed attempts over 4 min
+```
+
+- The first line is the **first failed attempt after a success**. `; retrying` is added only when another
+  attempt is queued. The error text is the exception that ended the attempt (`no status` if the monitor
+  answered with nothing usable).
+- The second line is the **first success after failures**. It says how many attempts failed in a row and over
+  how many minutes. A short streak (one to three attempts) is normal on a marginal link; the retries exist
+  for exactly this.
+- Every failure in between stays at DEBUG (`read failed again (...), N in a row`), visible only with
+  [debug logging](troubleshooting.md#debug-logging).
+- A first line with no matching second line for a long time means the monitor is still failing. Compare with
+  the *has not been read* notification, which comes after an hour.
+
 ## The four numbers
 
 ### First-attempt read success (4 h)

@@ -100,8 +100,16 @@ With a URL set:
 - when a window is missed (all of Home Assistant's reads for it failed), after a restart gap, and once an
   hour for any window still missed in the last 24 hours, it asks `/windows` for the windows it lacks and
   adds them to the archive, marked `source = backup`;
+- while Home Assistant's own reads of a monitor are failing (its last good read is more than 7 minutes old),
+  it asks `/latest?serial=...` at most every 5 minutes for the monitor's latest device values, so the
+  [device-value sensors](entities.md#device-values-from-the-backup-reader) stay available. They show
+  `source: backup`. Counts still come only through the window path above;
 - each request times out after 5 seconds. A dead or wrong backup reader never affects Home Assistant's own
   reads; the binary sensor just turns off.
+
+A backup value is accepted only if it is newer than any read so far (Home Assistant's or an earlier backup
+one), less than 20 minutes old, and no more than 2 minutes ahead of Home Assistant's clock (a guard against
+a backup machine whose clock runs fast). Anything else is ignored. Keep both machines' clocks synchronised.
 
 ### Parallel run
 

@@ -49,12 +49,14 @@ was built around three ideas:
   `reliable_radoneye:windows_<serial>`).
 - Counts-based radon over 1 h and 24 h with lower/upper bounds, and a configurable conversion factor *k*.
 - The device's own values: latest radon, 1-day and 1-month averages, peak, last boot.
+  With a backup reader, they stay available while Home Assistant's own Bluetooth fails (their `source` attribute shows `backup`); counts still come only through the window path.
 - Reliability diagnostics: first-attempt read success per 4 h block (kept in long-term statistics), window
   capture and missed windows over 24 h, a counts-vs-device check over 7 days, radio time share.
 - A live check, per monitor, that its counts really follow a 10-minute window before counts mode is used,
   shown by the *Counting window check* diagnostic sensor (pending, passed or failed).
 - Daily pull of the device's stored hourly log that fills **missing** hours in the long-term radon
   statistics (never overwrites), in every mode; `reliable_radoneye.pull` service.
+- Failed reads are logged at WARNING once per failure streak (the first failure, and the recovery), not on every attempt.
 - Honest staleness, persistent notifications for an unreachable monitor or an overloaded radio, and a Repair
   issue for a monitor whose counting window is not recognised.
 - Everything is local. No cloud, no account.

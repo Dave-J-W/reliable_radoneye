@@ -24,7 +24,10 @@ missed stay *missed*. See [Reliability](../../docs/reliability.md).
 - **A 24-hour ring** of captured windows per monitor, saved to `~/radon_counts/ring.json` of the service
   user after each new window, so it survives restarts. A corrupt ring file is renamed to `ring.json.bad` and
   a new one started.
-- **An HTTP server** on port **8765**, all interfaces, with two read-only endpoints (see [API](#api)).
+- **The latest good read** of each monitor (its device values, uptime and signal strength) saved to
+  `~/radon_counts/latest.json`, next to the ring. It is rewritten after each good read; a save error is
+  logged and never fails the read. A corrupt file is renamed to `latest.json.bad`.
+- **An HTTP server** on port **8765**, all interfaces, with three read-only endpoints (see [API](#api)).
 - No CSV files; Home Assistant keeps the archive.
 
 In a real deployment on a Raspberry Pi's built-in radio, the backup reader completed about 1,500 reads over
@@ -111,6 +114,11 @@ Home Assistant then:
 - asks `/status` once an hour (the binary sensor);
 - asks `/windows` when a window is missed, after a restart gap, and hourly for any window still missed in the
   last 24 hours;
+- asks `/latest` for a monitor's device values while its own reads of that monitor are failing (its last good
+  read is more than 7 minutes old), at most every 5 minutes. The device-value sensors then stay available and
+  show `source: backup`. A value is accepted only if it is newer than any read so far, under 20 minutes old,
+  and no more than 2 minutes ahead of Home Assistant's clock. It is used for those sensors only, never for
+  counts, the archive or the reliability numbers;
 - times out each request after 5 seconds, and never lets a backup failure affect its own reads.
 
 Windows that arrive from the backup reader are archived with `source = backup`. If Home Assistant later reads
@@ -129,11 +137,11 @@ These are constants at the top of `rd200_counts.py`; there are no command-line o
 | Scan before connect | up to 6 s |
 | Connection cap | 15 s |
 | Ring span | 24 hours |
-| Data folder | `~/radon_counts/` (ring file `ring.json`) |
+| Data folder | `~/radon_counts/` (ring file `ring.json`, latest reads in `latest.json`) |
 
 ## API
 
-Both endpoints are `GET` only and return JSON. Anything else returns `404` with `{"ok": false}`.
+All endpoints are `GET` only and return JSON. Anything else returns `404` with `{"ok": false}`.
 
 ### `GET /windows?serial=<serial>&since=<UTC ISO time>`
 
@@ -181,6 +189,32 @@ The configured monitors, the last result per monitor and the next planned read.
 
 `last` is empty until the first read after a start. `error` holds the failure text of a failed read.
 
+### `GET /latest?serial=<serial>`
+
+The device values of the monitor's latest good read, taken from `latest.json`. `serial` is required and
+matched case-insensitively. It returns `404` with `{"ok": false}` if there is no good read of that monitor
+yet (or `serial` is missing or unknown). It carries no particle counts and no raw packet.
+
+```sh
+curl "http://backup-host.local:8765/latest?serial=XX01RE000001"
+```
+
+```json
+{"read_at_utc": "2026-10-05T12:25:30.123456+00:00", "rssi": -78, "uptime_minutes": 44135,
+ "latest_bq_m3": 21, "latest_pci_l": 0.57, "day_avg_bq_m3": 24, "day_avg_pci_l": 0.65,
+ "month_avg_bq_m3": 26, "month_avg_pci_l": 0.7, "peak_bq_m3": 55, "peak_pci_l": 1.49}
+```
+
+| Field | Meaning |
+|---|---|
+| `read_at_utc` | When the backup reader finished that read (its own clock) |
+| `rssi` | Signal strength of the monitor as the backup machine heard it, dBm, or `null` |
+| `uptime_minutes` | The monitor's uptime at the read |
+| `latest_*`, `day_avg_*`, `month_avg_*`, `peak_*` | The monitor's own values, in Bq/m³ (integer) and pCi/L |
+
+Home Assistant refuses a record whose `read_at_utc` is more than 2 minutes ahead of its own clock, older
+than 20 minutes, or not newer than a read it already has. Keep the backup machine's clock synchronised.
+
 ## Security
 
 - **No authentication and no encryption.** Anyone who can reach port 8765 can read the windows and the
@@ -211,7 +245,8 @@ A log line looks like `upstairs attempt 1 ok=True rssi=-78`. A failure shows the
 - **Disk.** The ring holds at most 24 hours (about 144 windows per monitor), so it stays small. Old trial CSVs
   in `~/radon_counts/`, if any, are not touched.
 - **Clock.** Window times come from the backup machine's clock. Keep it synchronised (NTP, which most
-  distributions enable by default); a wrong clock would misplace windows.
+  distributions enable by default); a wrong clock would misplace windows, and `/latest` values dated more
+  than 2 minutes ahead of Home Assistant are refused.
 - **Updating.** Copy the new `rd200_counts.py`, `protocol.py` and `windows.py` into `/opt/rd200/` and restart.
 - **Uninstalling.** `sudo systemctl disable --now rd200-counts`, delete
   `/etc/systemd/system/rd200-counts.service`, `/opt/rd200` and `~/radon_counts`, and clear the **Backup reader

@@ -25,7 +25,7 @@ Written by `core/archive.append_window`, once for each `WriteWindow` action.
 | Column | Example | Meaning |
 |---|---|---|
 | `window_end_utc` | `2026-10-01T12:00:08.123456+00:00` | Computed rollover that closed the window (ISO 8601, UTC). It is up to 1 min *after* the true rollover, and it carries the seconds of the capturing read. |
-| `boot_utc` | `2026-09-01T00:00:00+00:00` | Monitor's power-up time (read − uptime, floored to the minute) for HA rows. **Empty for backup rows.** |
+| `boot_utc` | `2026-09-01T00:00:00+00:00` | Monitor's power-up time (read − uptime, floored to the minute). For a backup row it is filled only when the window's index fits the boot currently known (within 3 min); otherwise **empty**. |
 | `window_index` | `2299` | ⌊uptime/10⌋ − 1 at the capturing read: 0-based window number within the boot. |
 | `count` | `2` | Exact alpha counts in that 10-minute window (`counts_previous`). |
 | `source` | `ha` / `backup` | Who captured it. |
@@ -217,6 +217,7 @@ Per-monitor keys (`MonitorEngine.to_state`):
 | `k` | number | the factor in force at the last save | |
 | `boot` | object | `boot_utc`, `last_uptime`, `last_read_utc` | |
 | `conflicts_warned` | list of int | window end times (epoch s) already reported as a count conflict | 8 days |
+| `device` | object or null | The newest good read shown by the device-value entities: `at` (full-precision ISO UTC; older Stores hold epoch seconds, which still load), `source` (`ha` or `backup`) and `status` (the device values). Only `at` is used after a restart, as the floor a backup value must beat; nothing is shown until a read in the current run, and an `at` more than 2 min ahead of the clock is dropped on load. | replaced by each newer read |
 
 The Store must only be edited with HA stopped. A pending delayed save would otherwise overwrite the edit.
 
@@ -231,6 +232,10 @@ The reader's configuration. It is read once at start.
 ```json
 [ {"label": "0001", "serial": "XX01RE000001", "address": "AA:BB:CC:DD:EE:01"} ]
 ```
+
+### `~/radon_counts/latest.json`
+
+The latest good read per monitor, keyed by upper-cased serial: the `/latest` record (see the HTTP API below). It is rewritten atomically (`.tmp` then `os.replace`) after each good read; a failed save is logged and never fails the read. A file that cannot be read is renamed to `latest.json.bad`. It is separate from `ring.json` so the ring format is unchanged.
 
 ### `~/radon_counts/ring.json`
 
@@ -253,18 +258,19 @@ same `WindowLog` code as HA.
 |---|---|
 | `GET /windows?serial=<serial>&since=<UTC ISO>` | JSON list of ring entries (as above) with `end_utc > since`. `serial` is upper-cased. `since` accepts a `Z` suffix, a `+` decoded as a space, or a naive time (taken as UTC); the default is 1970. |
 | `GET /status` | `{"monitors": [...monitors.json...], "last": {label: {at, ok, attempt, rssi, uptime_minutes, error}}, "pending": {serial: next due ISO}}` |
+| `GET /latest?serial=<serial>` | The device values of the monitor's latest good read: `{"read_at_utc", "rssi", "uptime_minutes", "latest_bq_m3", "latest_pci_l", "day_avg_bq_m3", "day_avg_pci_l", "month_avg_bq_m3", "month_avg_pci_l", "peak_bq_m3", "peak_pci_l"}`. `404 {"ok": false}` if there is no good read of that monitor yet. |
 
 The error responses are:
 
 - `400 {"ok": false, "error": "bad since: …"}`;
-- `404 {"ok": false}` for anything else.
+- `404 {"ok": false}` for anything else, including `/latest` for a monitor with no good read yet.
 
 Every response closes the connection.
 
 HA calls `/status` hourly to set the `Backup reader reachable` sensor. It calls `/windows` to fill missed or
 not-observed windows, with `since` = the missed window's end − 12 min, or the last stored window after a
 restart. Every HTTP call has a 5 s total timeout. HA stores the backup's windows with `source = backup` and no
-`device_bq`.
+`device_bq`. HA calls `/latest` only while its own reads of that monitor are failing (last good read older than 7 min, at most every 5 min); it accepts the record only if `read_at_utc` is newer than any read so far, at most 20 min old and at most 2 min ahead of HA's clock, and uses it for the device-value entities only (never for windows or counts).
 
 The reader's own schedule:
 

@@ -17,6 +17,8 @@ turn on [debug logging](#debug-logging) for 15 minutes first.
 | `BleakCharacteristicNotFoundError` in the log | [BleakCharacteristicNotFoundError](#bleakcharacteristicnotfounderror) |
 | Slow connects, `le-connection-abort-by-local`, `TimeoutError` | [Slow connects and connect aborts](#slow-connects-and-connect-aborts) |
 | Backup reader reachable is off | [Backup reader unreachable](#backup-reader-unreachable) |
+| A device-value sensor shows `source: backup` | [Radon showed source: backup](#radon-showed-source-backup) |
+| WARNING lines *read failed ... retrying* or *read OK again* in the log | [Radon showed source: backup](#radon-showed-source-backup) |
 | Last pull shows `failed`, or no hours filled | [Daily log pull problems](#daily-log-pull-problems) |
 | Notification about a count conflict | [Count conflict](#count-conflict-notification) |
 | Notification *RadonEye radio load* | [Radio load](#radio-load-notification) |
@@ -112,7 +114,8 @@ The issue clears by itself when a check passes.
 
 **Rule:** device values go `unavailable` after **20 minutes** with no good read. After a Home Assistant restart
 they are also `unavailable` until the first read, which normally comes within a few minutes. This is deliberate:
-an old value is never shown as current.
+an old value is never shown as current. With a backup reader configured, a fresh value from it keeps them
+available (`source: backup`, see [below](#radon-showed-source-backup)).
 
 | Cause | How to tell | Fix |
 |---|---|---|
@@ -186,8 +189,8 @@ then retries at +20 s and +60 s.
 
 **What you see:** **Backup reader reachable** is off.
 
-Home Assistant asks the backup reader's `/status` once an hour, and `/windows` when it needs windows. Each
-request times out after 5 seconds.
+Home Assistant asks the backup reader's `/status` once an hour, `/windows` when it needs windows, and
+`/latest` while its own reads of a monitor are failing. Each request times out after 5 seconds.
 
 Check, in order:
 
@@ -205,6 +208,38 @@ Check, in order:
 A dead backup reader never affects Home Assistant's own reads. Without it, windows missed during a Home
 Assistant restart are recorded as *not observed* instead of being filled. See the
 [backup reader guide](../extras/backup_reader/README.md#operations).
+
+## Radon showed source: backup
+
+**What you see:** the **Radon**, 1-day, 1-month or peak sensor has the attribute `source: backup`, and the
+log may show WARNING lines such as:
+
+```text
+RadonEye upstairs: read failed (TimeoutError); retrying
+RadonEye upstairs: read OK again after 3 failed attempts over 4 min
+```
+
+**What it means:** Home Assistant's own Bluetooth could not read the monitor for more than 7 minutes, so the
+value came from the [backup reader](../extras/backup_reader/README.md) instead of going `unavailable`. Only
+the device-value sensors use it; counts-based radon is unaffected (it still comes only from captured windows).
+The first WARNING line is the first failed attempt after a success; the second is the first success after
+failures, with the number of failed attempts and minutes. Other failures in the streak are DEBUG only.
+
+If the backup is covering when the monitor has gone an hour unread, the *has not been read* notification says
+so.
+
+**Cause:** Home Assistant's radio link to the monitor is weak. One or two occasional `backup` periods are
+harmless. If it is frequent:
+
+1. Add a **Bluetooth proxy** near the monitor (an ESP32 running ESPHome's `bluetooth_proxy` with active
+   connections, or a second adapter). See [Reliability](reliability.md#improving-a-weak-link).
+2. Check *First-attempt read success* and the debug log, as in
+   [Low first-attempt read success](#low-first-attempt-read-success).
+3. If `source` stays `backup` and the backup value does not change, check that the backup machine's clock is
+   right: values dated more than 2 minutes in the future, or more than 20 minutes old, are refused.
+4. If no `source` attribute ever appears while Home Assistant fails, check the
+   [backup reader](#backup-reader-unreachable) and that `curl "http://<host>:8765/latest?serial=<serial>"`
+   returns JSON. A `404` there means the backup has not had a good read of that monitor yet.
 
 ## Daily log pull problems
 
